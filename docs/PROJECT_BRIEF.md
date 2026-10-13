@@ -241,7 +241,7 @@ Each criterion is written so it can be checked individually, by inspection of th
 1. **Planning commit on `main`:** only `docs/PROJECT_BRIEF.md`, `docs/ARCHITECTURE.md`, `REFLECTION.md`, `.gitignore` and `CLAUDE.md`. Also in `docs/`, `SUPABASE_REFERENCES.md` is a new planning file and needs approval to be included (see section 9). Other pending files (migrations, `/notes` page, `package*.json`, tooling) are committed separately.
 2. **Feature branch 1, `feature/db-schema-and-helper`:** schema migrations (four tables, constraints, `updated_at` handling), the `updated_at` trigger, the temporary anon-access migration, seed data and `lib/notes-db.ts` with types. `CLAUDE.md` (E10) already exists from the planning commit and is updated here if the rules change.
 3. **Feature branch 2, `feature/notes-ui`:** three-column UI, notes CRUD, collections in the sidebar, assignment, tags, AND filter, live search, empty states, demo-mode notice (R6–R12).
-4. **Feature branch 3 (optional task), `feature/note-count-badges`:** the badge feature (E6).
+4. **Feature branch 3 (optional task), `feature/collection-count-badges`:** the badge feature (E6).
 5. **Documentation:** `docs/SUPABASE_REFERENCES.md` (E11) is already written, with its source URLs at the top, and is extended when new Supabase behaviour is used.
 
 Each branch is merged through its own PR (E7). Branch 3 satisfies E6.

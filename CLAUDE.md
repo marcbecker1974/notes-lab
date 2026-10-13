@@ -42,7 +42,7 @@ Read before working: `docs/PROJECT_BRIEF.md` (scope and acceptance criteria), `d
 ## Git workflow
 
 - Meaningful commit messages, Conventional Commits style (`feat(db): add collections and tags tables`). No "update" or "wip".
-- Planning docs go in the first commit on `main`. Application work goes on feature branches (`feature/db-schema-and-helper`, `feature/notes-ui`, `feature/note-count-badges`) merged through pull requests.
+- Planning docs go in the first commit on `main`. Application work goes on feature branches (`feature/db-schema-and-helper`, `feature/notes-ui`, `feature/collection-count-badges`) merged through pull requests.
 - Check `git status` before every commit; never stage `.env.local` or `supabase/.temp/`.
 - Do not commit, push or create a repository or remote unless asked.
 - Before merging a PR, run a review slash command on its diff and record a real finding in `REFLECTION.md`. Also review one PR diff in a fresh Claude Code session and record a finding. Never invent findings.

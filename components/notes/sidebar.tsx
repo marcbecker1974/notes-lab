@@ -3,7 +3,7 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { ChevronRight, Folder, FolderPlus, Inbox, Library, Trash2 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
+import { Badge, badgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
@@ -241,15 +241,13 @@ export function Sidebar(props: SidebarProps) {
   );
 }
 
+// A span (valid inside a button); the screen-reader text gives "3 notes" with the right plural.
 function CountBadge({ count }: { count: number }) {
   return (
-    <Badge
-      variant="count"
-      className="ml-auto shrink-0"
-      aria-label={`${count} ${count === 1 ? "note" : "notes"}`}
-    >
+    <span className={cn(badgeVariants({ variant: "count" }), "ml-auto shrink-0")}>
       {count}
-    </Badge>
+      <span className="sr-only">&nbsp;{count === 1 ? "note" : "notes"}</span>
+    </span>
   );
 }
 
