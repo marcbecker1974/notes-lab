@@ -3,7 +3,7 @@
 import { useRef, useState, type FocusEvent, type FormEvent, type KeyboardEvent } from "react";
 import { Folder, Trash2, X } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
+import { Badge, badgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -127,12 +127,15 @@ export function NoteEditor(props: NoteEditorProps) {
               value={draft.title}
               onChange={(event) => props.onDraftChange({ ...draft, title: event.target.value })}
               aria-invalid={titleBad}
+              aria-describedby={draft.title.trim() === "" ? "note-title-error" : undefined}
               placeholder="Title"
               className="h-12 text-lg font-semibold shadow-none md:text-lg"
             />
             <Counter value={titleLength} max={NOTE_TITLE_MAX} />
             {draft.title.trim() === "" && (
-              <p className="text-sm text-destructive">A note needs a title.</p>
+              <p id="note-title-error" role="alert" className="text-sm text-destructive">
+                A note needs a title.
+              </p>
             )}
           </div>
 
@@ -367,10 +370,10 @@ function TagEditor({
               onClick={() => void add(tag.name).then(() => inputRef.current?.focus())}
               className="rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
-              <Badge variant="outline" className="cursor-pointer gap-1.5">
+              <span className={cn(badgeVariants({ variant: "outline" }), "cursor-pointer gap-1.5")}>
                 <span className={cn("h-2 w-2 rounded-full", PALETTE[tag.color].dot)} />
                 + {tag.name}
-              </Badge>
+              </span>
             </button>
           ))}
         </div>

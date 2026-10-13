@@ -2,7 +2,9 @@
 // (see the add_palette_colors migration); the classes are written out in full so
 // Tailwind can see them. Light mode pairs a 100 background with 800 text (about
 // 7:1 contrast); dark mode uses a dark tint with 200 text. Dots and folders use
-// the 500/600 shades, which only need 3:1 as non-text graphics.
+// the 500/600 shades. Note: amber, green and teal 500 dots are below 3:1 on white
+// (about 2.1 to 2.5:1); the tag or collection name always sits next to the dot, so
+// colour is never the only cue, but a darker shade would be needed to meet 1.4.11.
 
 export const PALETTE_KEYS = [
   "slate",

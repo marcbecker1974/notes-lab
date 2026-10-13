@@ -52,6 +52,7 @@ export function ColorSwatchMenu({
           {PALETTE_KEYS.map((key) => (
             <DropdownMenuItem
               key={key}
+              role="menuitemradio"
               aria-label={PALETTE[key].label}
               aria-checked={key === value}
               onSelect={() => {

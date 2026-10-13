@@ -32,7 +32,7 @@ The official course list has 12 mandatory requirements. All must be met; each ha
 | R3 | The `collections` table contains `id`, `name`, `created_at`. |
 | R4 | Notes belong to zero or one collection: `notes.collection_id` is a nullable foreign key referencing `collections`. |
 | R5 | Tags use two tables, `tags` and `note_tags`; notes and tags are many-to-many. |
-| R6 | The sidebar displays expandable collections. Selecting a collection expands it and shows its notes. Unassigned notes appear under "All notes" or "Uncollected". |
+| R6 | The sidebar lists collections as selectable rows. Selecting a collection shows its notes in the notes list. Unassigned notes appear under "All notes" or "Uncollected". (Changed in Feature 4: the original wording required expandable collections that list their notes in the sidebar; the owner approved a flat list following the original mockup.) |
 | R7 | Users can create named collections directly from the sidebar. |
 | R8 | Users can assign notes to collections; changes persist in Supabase. |
 | R9 | Users can add and remove tags on notes; tags appear on the note cards in the notes list (changed in Feature 4: the sidebar no longer lists notes). |
@@ -144,9 +144,9 @@ Each criterion is written so it can be checked individually, by inspection of th
 - R5.2 The same tag can be attached to several notes and a note can have several tags; attaching the same tag to a note twice is rejected.
 - R5.3 Deleting a note or a tag removes the related `note_tags` rows.
 
-**R6: expandable collections in the sidebar**
-- R6.1 The sidebar lists every collection; each can be expanded and collapsed.
-- R6.2 Selecting a collection expands it and shows exactly the notes assigned to it.
+**R6: collections in the sidebar** (scope change approved in Feature 4: flat rows instead of an expandable tree)
+- R6.1 The sidebar lists every collection as a selectable row with its note count. (Originally: each collection can be expanded and collapsed. Superseded by the approved scope change.)
+- R6.2 Selecting a collection shows exactly the notes assigned to it in the notes list. (Originally: it also expanded in the sidebar.)
 - R6.3 Notes without a collection appear under "All notes" or "Uncollected".
 - R6.4 "All notes" shows every note regardless of collection.
 
@@ -163,7 +163,7 @@ Each criterion is written so it can be checked individually, by inspection of th
 **R9: add and remove tags**
 - R9.1 A user can add a tag to a note, either by choosing an existing tag or typing a new name.
 - R9.2 A user can remove a tag from a note without deleting the tag from other notes.
-- R9.3 Tags appear on each note card in the sidebar and update immediately after adding or removing.
+- R9.3 Tags appear on each note card in the notes list and update immediately after adding or removing. (Originally: also on cards in the sidebar.)
 - R9.4 Tag changes persist after a page reload.
 
 **R10: multi-tag AND filter**
@@ -264,7 +264,7 @@ Each branch is merged through its own PR (E7). Branch 3 satisfies E6.
 
 | # | Decision |
 |---|----------|
-| Q1 | Keep the three-column layout: left = expandable collections with their notes and tags; middle = filtered, searchable notes list; right = editor. Shared note-card component where appropriate. |
+| Q1 | Keep the three-column layout: left = collections (flat rows, Uncollected first) and tags, with counts; middle = filtered, searchable notes list; right = editor. Shared note-card component where appropriate. |
 | Q2 | `notes.updated_at` is maintained by a PostgreSQL trigger. |
 | Q3 | `collections.user_id` stays nullable for future authentication compatibility. |
 | Q7 | UI library: shadcn/ui + Tailwind CSS (compared options Primer and Material UI not pursued). |

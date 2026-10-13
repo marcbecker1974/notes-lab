@@ -53,7 +53,7 @@ The sidebar tree and the middle list read from the same in-memory state, so a ch
 ### Implemented behaviour and responsive layout (decided 2026-10-13)
 
 - **Wide desktop (1200px and up):** three columns of 280px (sidebar), 420px (notes list) and the remaining width (editor), following `docs/design/notes-lab-original-mockup.png`. Each column scrolls on its own. Editor content is centred and limited to 1100px. A shared top bar over columns 2 and 3 holds the search field (and, at medium widths, the sidebar toggle and a New note button). The app background is a light gray (`--app`, #F3F5F8); the sidebar, notes list and editor are three separate white surfaces with 12px gaps, 12px radii and thin borders, without shadows.
-- **Medium (768 to 1199px):** the collections sidebar is collapsible so the list and editor keep the width. It is hidden by default and opened with a toggle button in the notes-list header; it then appears as a 260px overlay with a close button. It also closes on Escape, a backdrop click, or when a collection or note is chosen. The list stays 360px.
+- **Medium (768 to 1199px):** the collections sidebar is collapsible so the list and editor keep the width. It is hidden by default and opened with a toggle button in the top bar next to the search field; it then appears as a 260px overlay with a close button. It also closes on Escape, a backdrop click, or when a collection or note is chosen. The list stays 360px.
 - **Below 768px:** the columns simply stack, with the sidebar always visible and no toggle. A dedicated mobile design is **not** part of the MVP (accepted). **Known limitation (follow-up task):** in this stacked layout the editor row is about 2px high, so a note cannot be edited below 768px; the fix is to let the page scroll on small screens, which changes the mobile layout and is not part of Feature 4.
 - **Editing:** explicit Save button with an "Unsaved changes" indicator. Switching notes with unsaved changes asks "Save and switch", "Discard changes" or "Cancel". The selected note stays selected when saving changes its list position (selection is by id).
 - **`updated_at`:** every note update, including moving a note between collections, bumps `updated_at` (the trigger has no `when` clause); the list is re-sorted locally by `updatedAt` then `id`, descending. Deleting a collection reloads the notes so their new `updated_at` values show. Adding or removing a tag changes `note_tags`, not the note row, so it does **not** bump `updated_at`.
@@ -109,14 +109,14 @@ Planned API:
 | Area | Functions |
 |---|---|
 | Notes | `listNotes` (with tag ids), `createNote`, `updateNote`, `deleteNote`, `setNoteCollection` |
-| Collections | `listCollections`, `createCollection`, `deleteCollection` (rename optional) |
-| Tags | `listTags`, `addTagToNote` (find or create the tag, then insert into `note_tags`), `removeTagFromNote` (tag colour update optional) |
+| Collections | `listCollections`, `createCollection` (optional colour), `setCollectionColor`, `deleteCollection` (rename optional) |
+| Tags | `listTags`, `createTag` (a tag on its own, optional colour), `addTagToNote` (find or create the tag, optional colour for a new tag, then insert into `note_tags`), `removeTagFromNote`, `setTagColor` |
 
 ## 5. Temporary anonymous access and security risks
 
 ### Current state (applied and verified against the live database, 2026-10-13)
 
-- 11 migrations are applied (Postgres 17.11). `public` holds `notes`, `collections`, `tags` and `note_tags`, all with RLS enabled (not forced).
+- 12 migrations are applied (Postgres 17.11). `public` holds `notes`, `collections`, `tags` and `note_tags`, all with RLS enabled (not forced).
 - **Policies:** exactly 16, named `TEMP anon <operation> <table>`, one per operation and table, each `to anon, authenticated` with `using (true)` / `with check (true)`. The two older `notes` select policies were dropped.
 - **Grants:** `anon` and `authenticated` hold only `SELECT, INSERT, UPDATE, DELETE` on the four tables and no sequence privileges. Supabase's default privileges (`TRUNCATE`, `REFERENCES`, `TRIGGER`, `MAINTAIN` for `anon`, `authenticated` and `service_role` on every new table created by `postgres`) were revoked for `anon` and `authenticated` by the temp migration. `TRUNCATE` is not subject to RLS, so **every new table needs its own `revoke all` first** (see `CLAUDE.md`).
 - **`public.rls_auto_enable()`:** a Supabase-provided `SECURITY DEFINER` function, owned by `postgres`, used by the `ensure_rls` event trigger that enables RLS on new tables in `public`. It is executable by `anon` and `authenticated` (through the default `PUBLIC` privilege), which the security advisor flags as two warnings. Restricting it was **deferred**; see `REFLECTION.md`.
