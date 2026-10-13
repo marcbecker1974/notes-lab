@@ -284,3 +284,27 @@ I checked each finding against the code and the live database before acting:
 4. ~~Compare shadcn/ui, GitHub Primer and Material UI~~ decided: shadcn/ui + Tailwind (Feature 2 above).
 5. ~~Delete the two leftover test tags~~ (done); decide later whether to add tag deletion.
 (The earlier item "make the new-table migrations revoke default privileges" is done and applied in the temporary anon migration.)
+
+## Feature 3: collection count badges (`feature/collection-count-badges`)
+
+- **Counts come from state.** `countNotes(notes)` in `lib/notes-view.ts` returns `all`, `uncollected` and a per-collection map in one pass; the sidebar memoises it on `notes`. No new queries, no schema change. Every create, delete, move and collection delete already updates `notes`, so the badges follow at once.
+- **Totals, not filtered counts.** Badges ignore the tag filter and search, as requested, and match what the sidebar tree lists under each row. Zero is shown.
+- **Existing `Badge`, one new variant.** `count` (neutral `bg-muted`, rounded-full, 11px, tabular numbers). `ml-auto shrink-0` right-aligns it; labels keep `truncate`. "All notes" and "Uncollected" got a spacer where collections have the hover delete button, so all badges share one right edge (checked: same x for all three rows). The badge is a `span` with screen-reader text ("3 notes", singular "1 note"), so the row's accessible name is e.g. "Uncollected 4 notes" (see the review section below for why it is not an `aria-label`).
+- **Refactor limited to the sidebar panel.** The overlay wrapper, backdrop, hide button and Escape handling moved from `notes-app.tsx` into `sidebar-panel.tsx` unchanged (about 60 lines). Nothing else was extracted; `notes-app.tsx` is still the owner of state and dialogs.
+- **Verification.** Lint, `tsc` and build pass. New browser suite (13 checks, temporary `ZZ` data): create, move to Uncollected and back, search and tag filter leave counts unchanged, delete, collection delete moves the note to Uncollected, equal badge right edges, badges visible in the 1000px overlay and Escape still closes it. Earlier suites re-run: 27, 17, 33 and 12 checks pass. Four of those scripts had to be changed because they selected sidebar buttons by exact name, which now includes the count; this was a test selector issue, not an app defect. Test data was removed and the database is back to 8 notes, 3 collections, 4 tags.
+
+### PR #3 reviews (2026-10-13)
+
+**How they were run.** (1) `/comprehensive-review:full-review` headless (the earlier report directory was moved aside first). It stopped at its Checkpoint 1 after Phases 1 and 2 (code quality, architecture, security, performance); Phases 3 to 5 (testing, documentation, final report) were not run, so the testing and documentation dimensions were not covered by it. (2) A fresh-session `claude -p` that was told to review `gh pr diff 3` and not to read `REFLECTION.md` or `.full-review/`. The built-in `/code-review` was not part of this round.
+
+**Agreement.** Both found the counts correct (total, uncollected and per collection; zero shown; independent of filters; correct after create, move, delete and collection delete), the extraction a faithful move, no security issue and no data-access rule violation.
+
+| Finding | Found by | Verification | Outcome |
+|---|---|---|---|
+| `aria-label` on the badge `div` is not a valid name for a generic element, and a `div` inside a `button` is invalid HTML; screen readers may read only "3" and never say "note" or "notes" | both | Read the code: `Badge` renders a `div` with no role; the label was only checked in Chromium | Fixed: the badge is now a `span` styled with `badgeVariants`, with `sr-only` "note(s)" text. New browser checks: the row name is "All notes 8 notes" and "ZZ Cnt 1 note" |
+| `REFLECTION.md` claimed the label makes the accessible name include the count | both | Follows from the above | Reworded |
+| `CLAUDE.md` and `PROJECT_BRIEF.md` named the branch `feature/note-count-badges`; `ARCHITECTURE.md` still said "count badges (next branch)" | plugin | Read the files | Fixed |
+
+**Accepted, not changed.** `countNotes` and `notesInView` both define row membership and could drift (they agree today); `Sidebar` computes the uncollected list and its count separately; `SidebarPanel` spreads `Sidebar`'s props, so a future prop named `open` would clash; a note with an unknown collection id counts toward All notes only (the database foreign key prevents it); no unit test for `countNotes` (no test runner, as before); the Escape listener sets the flag at 1200px and above, as before the refactor.
+
+**Re-run after the fix.** Lint, `tsc` and build pass. Browser suites: 16 count checks (one of them, "no div inside button", is vacuous and should be ignored, so 15 meaningful), 27, 17, 33 and 12. The database is back to 8 notes, 3 collections and 4 tags.

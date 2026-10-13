@@ -31,6 +31,23 @@ export function notesInView(notes: Note[], view: View): Note[] {
   }
 }
 
+export type NoteCounts = {
+  all: number;
+  uncollected: number;
+  byCollection: Map<number, number>;
+};
+
+/** Total notes per view in one pass; ignores tag and search filters. */
+export function countNotes(notes: Note[]): NoteCounts {
+  const byCollection = new Map<number, number>();
+  let uncollected = 0;
+  for (const note of notes) {
+    if (note.collectionId === null) uncollected++;
+    else byCollection.set(note.collectionId, (byCollection.get(note.collectionId) ?? 0) + 1);
+  }
+  return { all: notes.length, uncollected, byCollection };
+}
+
 /** A note matches when it carries every selected tag (R10). */
 export function withAllTags(notes: Note[], tagIds: number[]): Note[] {
   if (tagIds.length === 0) return notes;

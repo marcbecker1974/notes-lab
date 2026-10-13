@@ -42,7 +42,7 @@ User ─► React client components (/notes) ─► lib/notes-db.ts ─► supab
 
 Three columns, with a shared note-card component:
 
-- **Left sidebar:** "All notes" and "Uncollected", expandable collections each listing their notes as cards with tag chips (R6, R9), the create-collection control (R7), and the tag filter. Count badges (optional task) sit on collection rows.
+- **Left sidebar:** "All notes" and "Uncollected", expandable collections each listing their notes as cards with tag chips (R6, R9), the create-collection control (R7), and the tag filter. Count badges (optional task) sit right-aligned on "All notes", "Uncollected" and every collection row, zero included. They are totals of the loaded notes, computed in memory by `countNotes` in `lib/notes-view.ts` (one pass, memoised on `notes`), so they ignore the tag filter and search and update at once on create, delete, move and collection delete. No extra queries. `components/notes/sidebar-panel.tsx` holds the responsive wrapper around the sidebar (overlay, backdrop, close button, Escape).
 - **Middle:** the filtered and searchable notes list (collection selection, AND tag filter and live search combined), rendered with the same note-card component, plus the search box and the empty states.
 - **Right:** the note editor (title, body, collection assignment, tags).
 
@@ -57,7 +57,7 @@ The sidebar tree and the middle list read from the same in-memory state, so a ch
 - **`updated_at`:** every note update, including moving a note between collections, bumps `updated_at` (the trigger has no `when` clause); the list is re-sorted locally by `updatedAt` then `id`, descending. Deleting a collection reloads the notes so their new `updated_at` values show. Adding or removing a tag changes `note_tags`, not the note row, so it does **not** bump `updated_at`.
 - **Unsaved changes:** protected when switching notes or creating a new one (dialog) and on reload, tab close or Back (browser `beforeunload` prompt while the draft is dirty). A save never overwrites text typed while it was in flight. There is no draft persistence and no conflict detection: two tabs editing the same note overwrite each other (last write wins).
 - **Deleting:** notes and collections are deleted after a confirmation dialog; deleting a collection keeps its notes (they become Uncollected).
-- **Not in this feature:** tag colours, tag deletion, collection renaming, count badges (next branch).
+- **Not in this feature:** tag colours, tag deletion, collection renaming. (Count badges were added in the next feature, see below.)
 
 ## 3. Database schema and relationships
 
