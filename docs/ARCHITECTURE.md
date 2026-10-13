@@ -1,6 +1,6 @@
 # Architecture: Notes Lab MVP
 
-Status: **approved design, not yet implemented.** No migrations, policies or application code described here exist yet, except where marked "existing".
+Status: **database schema, temporary access policies and `lib/notes-db.ts` are implemented and applied (2026-10-13); the notes UI is not built yet.** `REFLECTION.md` records what was verified.
 
 Related: [PROJECT_BRIEF.md](./PROJECT_BRIEF.md)
 
@@ -18,9 +18,9 @@ Related: [PROJECT_BRIEF.md](./PROJECT_BRIEF.md)
 | Component | Role | Status |
 |---|---|---|
 | Next.js app (`/notes` route) | Three-column client UI: collections and tags / notes list / editor | `/notes` exists as a read-only list; UI to be built |
-| `lib/notes-db.ts` | The only module that talks to Supabase for notes data | To be created |
+| `lib/notes-db.ts` | The only module that talks to Supabase for notes data | Implemented (not yet used by the UI) |
 | supabase-js (browser client, `lib/supabase/client.ts`) | Data API client | Existing |
-| Supabase PostgreSQL (cloud) | Storage, migrations in `supabase/migrations/` | Existing project; 4 tables to be added |
+| Supabase PostgreSQL (cloud) | Storage, migrations in `supabase/migrations/` | Existing project; 4 tables applied (migrations `…094205`, `…094206`, `…094208`) |
 
 **Not needed:** custom backend or API routes, auth flows, Realtime, Storage, Edge Functions, ORM, state-management library, search service, any external service. The template's `/auth/*` and `/protected` pages stay untouched and unused.
 
@@ -74,8 +74,8 @@ tags (id, name, color null, user_id)
 - `user_id uuid null references auth.users(id) on delete cascade default auth.uid()` on `collections`, `notes` and `tags`.
 - For anonymous callers `auth.uid()` is null, so rows are created unowned. Once someone is signed in, the database sets the owner.
 - `note_tags` has no `user_id`; its future policies check ownership through the parent note.
-- `tags` uniqueness: `unique nulls not distinct (user_id, name)`, so anonymous users cannot create duplicate tags. This requires Postgres 15+; the linked project reports 17.11 (`supabase/.temp/postgres-version`), so it is supported. Re-check if the project is ever recreated.
-- **`updated_at` (course requirement R2), decided:** a PostgreSQL `before update` trigger on `notes` sets `updated_at = now()`, so it stays correct regardless of which client writes and `notes-db.ts` never sends it. The column defaults to `now()` on insert. The trigger function is created in the schema migration (not yet written).
+- `tags` uniqueness: unique indexes on `(user_id, lower(btrim(name))) nulls not distinct` for both `tags` and `collections`, so anonymous users cannot create duplicates that differ only by case or surrounding spaces. This requires Postgres 15+; the linked project reports 17.11 (`supabase/.temp/postgres-version`), so it is supported. Re-check if the project is ever recreated.
+- **`updated_at` (course requirement R2), decided:** a PostgreSQL `before update` trigger on `notes` sets `updated_at = now()`, so it stays correct regardless of which client writes and `notes-db.ts` never sends it. The column defaults to `now()` on insert. The trigger function `set_updated_at()` is created in the schema migration.
 - **Course table requirements, decided:** `collections` has the required `id`, `name`, `created_at` plus the nullable `user_id`. The extra column stays nullable for future authentication compatibility, so inserting a name alone works (R3).
 - Indexes on `notes(collection_id)`, `note_tags(tag_id)` and the `user_id` columns.
 - Size limits (abuse mitigation, see section 5): title ≤ 200 characters, body ≤ 20,000, tag and collection names ≤ 50.
@@ -99,19 +99,17 @@ Planned API:
 
 ## 5. Temporary anonymous access and security risks
 
-### Current state (verified against the live database, read-only, 2026-10-13)
+### Current state (applied and verified against the live database, 2026-10-13)
 
-- All 8 local migrations are applied on the remote project (Postgres 17.11). The only table in `public` is `notes` (3 seed rows), with the columns `id`, `title`, `body`, `created_at`. It has none of the planned columns (`updated_at`, `collection_id`, `user_id`) and no triggers.
-- **RLS:** enabled on `notes` (not forced).
-- **Policies:** exactly two, both `SELECT` with `using (true)`: `Authenticated users can view notes` (role `authenticated`) and `Notes are viewable by everyone` (role `public`, so it covers `anon` as well). There are no insert, update or delete policies.
-- **Grants:** `anon` and `authenticated` each hold `SELECT` plus `REFERENCES`, `TRIGGER` and `TRUNCATE` (and, on Postgres 17, `MAINTAIN`). The migration only grants `SELECT`; the other privileges come from Supabase's default privileges, which give `anon`, `authenticated` and `service_role` `TRUNCATE`, `REFERENCES`, `TRIGGER` and `MAINTAIN` on every table created by `postgres`. `INSERT`, `UPDATE` and `DELETE` are not granted, so writes are denied both by the missing grants and by the missing policies.
-- Consequence: **every new table will arrive with these extra privileges**. `TRUNCATE` is not subject to RLS, so the migrations for the four new tables must `revoke all` from `anon` and `authenticated` first and then grant only the needed privileges (`select, insert, update, delete`). Whether `TRUNCATE` is reachable through the Data API has not been tested; the revoke removes the question.
-- **`public.rls_auto_enable()`:** a Supabase-provided `SECURITY DEFINER` function, owned by `postgres`, used by the `ensure_rls` event trigger that enables RLS on new tables in `public`. It is executable by `anon` and `authenticated` (through the default `PUBLIC` privilege), which the security advisor flags as two warnings. See REFLECTION.md for the investigation and the recommended restriction, which belongs in a later migration.
+- 11 migrations are applied (Postgres 17.11). `public` holds `notes`, `collections`, `tags` and `note_tags`, all with RLS enabled (not forced).
+- **Policies:** exactly 16, named `TEMP anon <operation> <table>`, one per operation and table, each `to anon, authenticated` with `using (true)` / `with check (true)`. The two older `notes` select policies were dropped.
+- **Grants:** `anon` and `authenticated` hold only `SELECT, INSERT, UPDATE, DELETE` on the four tables and no sequence privileges. Supabase's default privileges (`TRUNCATE`, `REFERENCES`, `TRIGGER`, `MAINTAIN` for `anon`, `authenticated` and `service_role` on every new table created by `postgres`) were revoked for `anon` and `authenticated` by the temp migration. `TRUNCATE` is not subject to RLS, so **every new table needs its own `revoke all` first** (see `CLAUDE.md`).
+- **`public.rls_auto_enable()`:** a Supabase-provided `SECURITY DEFINER` function, owned by `postgres`, used by the `ensure_rls` event trigger that enables RLS on new tables in `public`. It is executable by `anon` and `authenticated` (through the default `PUBLIC` privilege), which the security advisor flags as two warnings. Restricting it was **deferred**; see `REFLECTION.md`.
 
-### Planned policy approach (not yet created)
+### Policy approach (as applied)
 
 - A **dedicated migration** (e.g. `…_temp_anon_access.sql`) holds all `to anon, authenticated` CRUD policies and grants for the four tables, and nothing else. Policies are named `TEMP anon …`, and the file carries a header comment explaining why it exists and when to delete it.
-- Schema and RLS-enablement migrations do not mention `anon`.
+- Schema and RLS-enablement migrations create no `anon` policies or grants.
 - The old "everyone" and duplicate select policies are replaced, leaving one policy set per table.
 - `anon` gets nothing outside these four tables. The service-role key is never used.
 - Table checks limit the size of what anonymous users can write (see section 3).
@@ -122,8 +120,11 @@ Planned API:
 - The publishable key ships in the browser bundle, so **anyone with the project URL and key can read, create, modify or delete any row**. RLS policies with `using (true)` provide no protection against them.
 - Size limits only cap the size of writes; they do not prevent spam or deletion.
 - No audit trail and no attribution of rows.
+- **"Localhost only" limits the app, not the database.** The Supabase Data API is on the internet, so anyone who obtains the project URL and key can call it from anywhere. Mass deletion, defacement and filling the database with rows are all possible and are accepted risks; the key is also readable by anyone who can load the app's pages.
+- `npm run dev` binds to `127.0.0.1` only (`next dev -H 127.0.0.1`). The default binds to all interfaces and prints a LAN "Network" URL, which would let other devices on the same network load the page and read the key. This was confirmed by running the default `next dev` during the PR review.
 - This is acceptable **only** for localhost development with non-sensitive data. Deploying, sharing the key or publishing it would turn it into a real exposure.
-- **Kill switch:** drop the temp migration's policies and revoke the anon grants. The app then becomes read-only or fully closed.
+- **Kill switch:** a new migration that drops the `TEMP anon` policies and runs `revoke all` on the four tables from `anon` and `authenticated`. The app then becomes fully closed until owner policies exist.
+- Lists in `notes-db.ts` are not paged. The Data API's row cap (default 1000, project setting not checked) would silently truncate them, so keep the sample data small or add paging before the data grows.
 
 ### Rules while anonymous access is on
 
@@ -145,8 +146,14 @@ Planned API:
 6. **Client:** swap `getClient()` only if a server client is needed; the existing browser client already carries the session.
 7. **Clean-up:** remove the demo banner and replace the test data.
 8. **Verify:** two users cannot see each other's rows, and an anonymous request returns nothing.
+9. **Checklist from the PR #1 review (all additional to steps 2 to 5):**
+   - `authenticated` also holds the TEMP grants and policies. With the template's sign-up pages, anyone who signs up can read and change every row until the TEMP policies are dropped, so drop them in the same migration that adds owner policies.
+   - Foreign-key checks bypass RLS. The `note_tags` insert policy must check ownership of both the note and the tag, and `notes` needs a check that `collection_id` belongs to the same owner, otherwise a user could reference another user's rows. Add a cross-owner test.
+   - Review the backfill: `where user_id is null` adopts every row written during the anonymous window, including rows planted by others.
+   - Restrict who can write `user_id` (and `created_at`) with column-level grants, or the owner policy's `with check` on `user_id`, so rows cannot be attributed to someone else.
+   - Replace the "demo mode" assumptions: paging for large lists and the row-cap behaviour.
 
-Steps 2 to 5 are the only schema or policy changes; no component logic changes.
+Steps 2 to 5 and the checklist in step 9 are the schema or policy changes; component logic does not change.
 
 ## 7. Requirements traceability
 
