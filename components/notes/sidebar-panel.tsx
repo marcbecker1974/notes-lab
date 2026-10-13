@@ -32,7 +32,7 @@ export function SidebarPanel({ open, onOpenChange, suspendEscape, ...sidebar }: 
         id="collections-panel"
         className={
           open
-            ? "flex min-h-0 flex-col md:max-[1199px]:absolute md:max-[1199px]:inset-y-0 md:max-[1199px]:left-0 md:max-[1199px]:z-30 md:max-[1199px]:w-[260px] md:max-[1199px]:bg-background md:max-[1199px]:shadow-xl"
+            ? "flex min-h-0 flex-col md:max-[1199px]:absolute md:max-[1199px]:inset-y-3 md:max-[1199px]:left-3 md:max-[1199px]:z-30 md:max-[1199px]:w-[260px] md:max-[1199px]:rounded-xl md:max-[1199px]:bg-background md:max-[1199px]:shadow-xl"
             : "flex min-h-0 flex-col md:max-[1199px]:hidden"
         }
       >

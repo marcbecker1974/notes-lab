@@ -48,6 +48,15 @@ export function countNotes(notes: Note[]): NoteCounts {
   return { all: notes.length, uncollected, byCollection };
 }
 
+/** How many notes carry each tag (totals, independent of filters). */
+export function countTagUses(notes: Note[]): Map<number, number> {
+  const uses = new Map<number, number>();
+  for (const note of notes) {
+    for (const id of note.tagIds) uses.set(id, (uses.get(id) ?? 0) + 1);
+  }
+  return uses;
+}
+
 /** A note matches when it carries every selected tag (R10). */
 export function withAllTags(notes: Note[], tagIds: number[]): Note[] {
   if (tagIds.length === 0) return notes;
