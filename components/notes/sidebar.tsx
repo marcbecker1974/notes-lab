@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { ChevronRight, Folder, FolderPlus, Inbox, Library, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { NAME_MAX, type Collection, type Note, type Tag } from "@/lib/notes-db";
-import { notesInView, sameView, type View } from "@/lib/notes-view";
+import { countNotes, notesInView, sameView, type View } from "@/lib/notes-view";
 import { cn } from "@/lib/utils";
 import { NoteCard } from "./note-card";
 
@@ -63,6 +63,7 @@ export function Sidebar(props: SidebarProps) {
     );
 
   const uncollected = notesInView(notes, { kind: "uncollected" });
+  const counts = useMemo(() => countNotes(notes), [notes]);
 
   return (
     <aside aria-label="Collections and tags" className="flex h-full min-h-0 flex-col border-r">
@@ -77,7 +78,9 @@ export function Sidebar(props: SidebarProps) {
               >
                 <Library className="h-4 w-4 shrink-0" />
                 <span className="truncate">All notes</span>
+                <CountBadge count={counts.all} />
               </button>
+              <span className="w-7 shrink-0" aria-hidden="true" />
             </div>
 
             <Collapsible
@@ -93,7 +96,9 @@ export function Sidebar(props: SidebarProps) {
                 >
                   <Inbox className="h-4 w-4 shrink-0" />
                   <span className="truncate">Uncollected</span>
+                  <CountBadge count={counts.uncollected} />
                 </button>
+                <span className="w-7 shrink-0" aria-hidden="true" />
               </div>
               <CollapsibleContent className="ml-6 space-y-0.5 py-0.5">
                 {uncollected.length === 0 ? (
@@ -138,6 +143,7 @@ export function Sidebar(props: SidebarProps) {
                     >
                       <Folder className="h-4 w-4 shrink-0" />
                       <span className="truncate">{collection.name}</span>
+                      <CountBadge count={counts.byCollection.get(collection.id) ?? 0} />
                     </button>
                     <Button
                       variant="ghost"
@@ -232,6 +238,18 @@ export function Sidebar(props: SidebarProps) {
         )}
       </form>
     </aside>
+  );
+}
+
+function CountBadge({ count }: { count: number }) {
+  return (
+    <Badge
+      variant="count"
+      className="ml-auto shrink-0"
+      aria-label={`${count} ${count === 1 ? "note" : "notes"}`}
+    >
+      {count}
+    </Badge>
   );
 }
 

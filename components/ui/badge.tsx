@@ -15,6 +15,9 @@ const badgeVariants = cva(
         destructive:
           "border-transparent bg-destructive text-destructive-foreground shadow hover:bg-destructive/80",
         outline: "text-foreground",
+        // Small neutral pill for counts (sidebar).
+        count:
+          "rounded-full border-transparent bg-muted px-1.5 py-0 text-[11px] font-medium tabular-nums text-muted-foreground",
       },
     },
     defaultVariants: {
