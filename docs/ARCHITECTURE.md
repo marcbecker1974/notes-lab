@@ -42,7 +42,7 @@ User ─► React client components (/notes) ─► lib/notes-db.ts ─► supab
 
 Three columns, with a shared note-card component:
 
-- **Left sidebar:** "All notes" and "Uncollected", expandable collections each listing their notes as cards with tag chips (R6, R9), the create-collection control (R7), and the tag filter. Count badges (optional task) sit on collection rows.
+- **Left sidebar:** "All notes" and "Uncollected", expandable collections each listing their notes as cards with tag chips (R6, R9), the create-collection control (R7), and the tag filter. Count badges (optional task) sit right-aligned on "All notes", "Uncollected" and every collection row, zero included. They are totals of the loaded notes, computed in memory by `countNotes` in `lib/notes-view.ts` (one pass, memoised on `notes`), so they ignore the tag filter and search and update at once on create, delete, move and collection delete. No extra queries. `components/notes/sidebar-panel.tsx` holds the responsive wrapper around the sidebar (overlay, backdrop, close button, Escape).
 - **Middle:** the filtered and searchable notes list (collection selection, AND tag filter and live search combined), rendered with the same note-card component, plus the search box and the empty states.
 - **Right:** the note editor (title, body, collection assignment, tags).
 

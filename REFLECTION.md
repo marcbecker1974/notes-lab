@@ -284,3 +284,11 @@ I checked each finding against the code and the live database before acting:
 4. ~~Compare shadcn/ui, GitHub Primer and Material UI~~ decided: shadcn/ui + Tailwind (Feature 2 above).
 5. ~~Delete the two leftover test tags~~ (done); decide later whether to add tag deletion.
 (The earlier item "make the new-table migrations revoke default privileges" is done and applied in the temporary anon migration.)
+
+## Feature 3: collection count badges (`feature/collection-count-badges`)
+
+- **Counts come from state.** `countNotes(notes)` in `lib/notes-view.ts` returns `all`, `uncollected` and a per-collection map in one pass; the sidebar memoises it on `notes`. No new queries, no schema change. Every create, delete, move and collection delete already updates `notes`, so the badges follow at once.
+- **Totals, not filtered counts.** Badges ignore the tag filter and search, as requested, and match what the sidebar tree lists under each row. Zero is shown.
+- **Existing `Badge`, one new variant.** `count` (neutral `bg-muted`, rounded-full, 11px, tabular numbers). `ml-auto shrink-0` right-aligns it; labels keep `truncate`. "All notes" and "Uncollected" got a spacer where collections have the hover delete button, so all badges share one right edge (checked: same x for all three rows). Each badge has an `aria-label` such as "3 notes"; this makes the row's accessible name include the count.
+- **Refactor limited to the sidebar panel.** The overlay wrapper, backdrop, hide button and Escape handling moved from `notes-app.tsx` into `sidebar-panel.tsx` unchanged (about 60 lines). Nothing else was extracted; `notes-app.tsx` is still the owner of state and dialogs.
+- **Verification.** Lint, `tsc` and build pass. New browser suite (13 checks, temporary `ZZ` data): create, move to Uncollected and back, search and tag filter leave counts unchanged, delete, collection delete moves the note to Uncollected, equal badge right edges, badges visible in the 1000px overlay and Escape still closes it. Earlier suites re-run: 27, 17, 33 and 12 checks pass. Four of those scripts had to be changed because they selected sidebar buttons by exact name, which now includes the count; this was a test selector issue, not an app defect. Test data was removed and the database is back to 8 notes, 3 collections, 4 tags.
