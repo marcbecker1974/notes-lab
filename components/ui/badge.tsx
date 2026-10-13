@@ -15,9 +15,11 @@ const badgeVariants = cva(
         destructive:
           "border-transparent bg-destructive text-destructive-foreground shadow hover:bg-destructive/80",
         outline: "text-foreground",
+        // Colours come from the palette classes passed in (tag badges).
+        soft: "border-transparent",
         // Small neutral pill for counts (sidebar).
         count:
-          "rounded-full border-transparent bg-muted px-1.5 py-0 text-[11px] font-medium tabular-nums text-muted-foreground",
+          "rounded-full border-transparent bg-black/[0.06] px-1.5 py-0 text-[11px] font-medium tabular-nums text-muted-foreground dark:bg-white/10",
       },
     },
     defaultVariants: {

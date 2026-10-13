@@ -10,13 +10,16 @@ import {
   addTagToNote,
   createCollection,
   createNote,
+  createTag,
   deleteCollection,
   deleteNote,
   listCollections,
   listNotes,
   listTags,
   removeTagFromNote,
+  setCollectionColor,
   setNoteCollection,
+  setTagColor,
   updateNote,
   type Collection,
   type NewNote,
@@ -24,6 +27,7 @@ import {
   type NotePatch,
   type Tag,
 } from "@/lib/notes-db";
+import { nextColor, type PaletteKey } from "@/lib/palette";
 import { sortNotes } from "@/lib/notes-view";
 
 export type LoadStatus = "loading" | "ready" | "error";
@@ -103,9 +107,28 @@ export function useNotesData() {
   }, []);
 
   const addCollection = useCallback(async (name: string) => {
-    const collection = await createCollection(name);
+    // New collections get the least-used colour so neighbours differ.
+    const collection = await createCollection(name, nextColor(collections.map((c) => c.color)));
     setCollections((current) => [...current, collection].sort(byName));
     return collection;
+  }, [collections]);
+
+  const changeCollectionColor = useCallback(async (id: number, color: PaletteKey) => {
+    const updated = await setCollectionColor(id, color);
+    setCollections((current) => current.map((c) => (c.id === id ? updated : c)));
+    return updated;
+  }, []);
+
+  const addNewTag = useCallback(async (name: string) => {
+    const tag = await createTag(name, nextColor(tags.map((t) => t.color)));
+    setTags((current) => [...current, tag].sort(byName));
+    return tag;
+  }, [tags]);
+
+  const changeTagColor = useCallback(async (id: number, color: PaletteKey) => {
+    const updated = await setTagColor(id, color);
+    setTags((current) => current.map((t) => (t.id === id ? updated : t)));
+    return updated;
   }, []);
 
   const removeCollection = useCallback(
@@ -124,7 +147,7 @@ export function useNotesData() {
   );
 
   const addTag = useCallback(async (noteId: number, name: string) => {
-    const tag = await addTagToNote(noteId, name);
+    const tag = await addTagToNote(noteId, name, nextColor(tags.map((t) => t.color)));
     setTags((current) =>
       current.some((t) => t.id === tag.id) ? current : [...current, tag].sort(byName),
     );
@@ -136,7 +159,7 @@ export function useNotesData() {
       ),
     );
     return tag;
-  }, []);
+  }, [tags]);
 
   const removeTag = useCallback(async (noteId: number, tagId: number) => {
     await removeTagFromNote(noteId, tagId);
@@ -163,6 +186,9 @@ export function useNotesData() {
     removeNote,
     addCollection,
     removeCollection,
+    changeCollectionColor,
+    changeTagColor,
+    addNewTag,
     addTag,
     removeTag,
   };

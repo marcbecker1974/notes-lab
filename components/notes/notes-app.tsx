@@ -21,6 +21,7 @@ import { DemoBanner } from "./demo-banner";
 import { NoteEditor, type Draft } from "./note-editor";
 import { NotesList } from "./notes-list";
 import { SidebarPanel } from "./sidebar-panel";
+import { TopBar } from "./top-bar";
 import { useNotesData } from "./use-notes-data";
 
 type Pending =
@@ -36,7 +37,6 @@ export function NotesApp() {
   const { notes, collections, tags } = data;
 
   const [viewState, setView] = useState<View>({ kind: "all" });
-  const [expanded, setExpanded] = useState<Set<number | "uncollected">>(new Set());
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [query, setQuery] = useState("");
   const [selectedNoteId, setSelectedNoteId] = useState<number | null>(null);
@@ -154,17 +154,7 @@ export function NotesApp() {
   const selectView = (next: View) => {
     setView(next);
     setSidebarOpen(false);
-    if (next.kind === "collection") {
-      setExpanded((current) => new Set(current).add(next.id));
-    }
   };
-
-  const toggleExpanded = (key: number | "uncollected") =>
-    setExpanded((current) => {
-      const next = new Set(current);
-      if (!next.delete(key)) next.add(key);
-      return next;
-    });
 
   const newNote = () =>
     guarded(async () => {
@@ -216,11 +206,6 @@ export function NotesApp() {
         setView((v) =>
           v.kind === "collection" && v.id === current.collection.id ? { kind: "all" } : v,
         );
-        setExpanded((cur) => {
-          const next = new Set(cur);
-          next.delete(current.collection.id);
-          return next;
-        });
       }
     }
   };
@@ -229,7 +214,7 @@ export function NotesApp() {
     return (
       <div className="flex h-screen flex-col">
         <DemoBanner />
-        <div className="grid min-h-0 flex-1 gap-0 md:grid-cols-[240px_360px_1fr]" aria-busy="true">
+        <div className="grid min-h-0 flex-1 gap-0 md:grid-cols-[280px_420px_1fr]" aria-busy="true">
           {[0, 1, 2].map((i) => (
             <div key={i} className="space-y-3 border-r p-4">
               <Skeleton className="h-8 w-2/3" />
@@ -262,6 +247,8 @@ export function NotesApp() {
       : view.kind === "uncollected"
         ? "Uncollected"
         : (collections.find((c) => c.id === view.id)?.name ?? "Collection");
+  const viewColor =
+    view.kind === "collection" ? (collections.find((c) => c.id === view.id)?.color ?? null) : null;
   const emptyViewMessage =
     view.kind === "collection"
       ? "No notes in this collection yet."
@@ -270,7 +257,7 @@ export function NotesApp() {
         : "No notes yet. Create your first note.";
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-screen flex-col bg-app">
       <DemoBanner />
       {error && (
         <Alert variant="destructive" className="rounded-none border-x-0 border-t-0">
@@ -282,7 +269,7 @@ export function NotesApp() {
           </AlertDescription>
         </Alert>
       )}
-      <main className="relative grid min-h-0 flex-1 grid-rows-[auto_auto_minmax(0,1fr)] md:grid-cols-[360px_minmax(0,1fr)] md:grid-rows-1 min-[1200px]:grid-cols-[240px_360px_minmax(0,1fr)]">
+      <main className="relative grid min-h-0 flex-1 gap-3 p-3 grid-rows-[auto_auto_auto_minmax(0,1fr)] md:grid-cols-[minmax(0,1fr)] md:grid-rows-1 min-[1200px]:grid-cols-[280px_minmax(0,1fr)]">
         <SidebarPanel
           open={sidebarOpen}
           onOpenChange={setSidebarOpen}
@@ -291,12 +278,8 @@ export function NotesApp() {
           collections={collections}
           tags={tags}
           view={view}
-          expanded={expanded}
-          selectedNoteId={selectedNoteId}
           selectedTagIds={selectedTagIds}
           onSelectView={selectView}
-          onToggleExpanded={toggleExpanded}
-          onSelectNote={selectNote}
           onToggleTag={(id) =>
             setSelectedTagIds((cur) =>
               cur.includes(id) ? cur.filter((t) => t !== id) : [...cur, id],
@@ -306,43 +289,60 @@ export function NotesApp() {
           deleting={deleting}
           onCreateCollection={createCollection}
           onDeleteCollection={(collection) => setPending({ kind: "delete-collection", collection })}
-        />
-        <NotesList
-          title={viewTitle}
-          notes={visibleNotes}
-          empty={empty}
-          emptyViewMessage={emptyViewMessage}
-          tags={tags}
-          selectedNoteId={selectedNoteId}
-          query={query}
-          filtersActive={selectedTagIds.length > 0}
-          creating={creating}
-          sidebarOpen={sidebarOpen}
-          onToggleSidebar={() => setSidebarOpen((o) => !o)}
-          onQueryChange={setQuery}
-          onSelectNote={selectNote}
+          onChangeCollectionColor={(id, color) => void act(() => data.changeCollectionColor(id, color))}
+          onChangeTagColor={(id, color) => void act(() => data.changeTagColor(id, color))}
           onNewNote={newNote}
-          onClearFilters={clearFilters}
+          creatingNote={creating}
+          onCreateTag={(name) => attempt(() => data.addNewTag(name))}
         />
-        <NoteEditor
-          note={selectedNote}
-          draft={activeDraft}
-          dirty={dirty}
-          saving={saving}
-          deleting={deleting}
-          collections={collections}
-          tags={tags}
-          onDraftChange={setDraft}
-          onSave={() => void save()}
-          onMove={(collectionId) =>
-            selectedNote && void act(() => data.moveNote(selectedNote.id, collectionId))
-          }
-          onAddTag={(name) => (selectedNote ? attempt(() => data.addTag(selectedNote.id, name)) : Promise.resolve(null))}
-          onRemoveTag={(tagId) =>
-            selectedNote && void act(() => data.removeTag(selectedNote.id, tagId))
-          }
-          onDelete={() => selectedNote && setPending({ kind: "delete-note", note: selectedNote })}
-        />
+        {/* Columns 2 and 3: a shared header, then the list and the editor. On mobile these
+            wrappers vanish (display: contents) and everything stacks as before. */}
+        <div className="flex min-h-0 flex-col gap-3 max-md:contents">
+          <TopBar
+            query={query}
+            onQueryChange={setQuery}
+            sidebarOpen={sidebarOpen}
+            onToggleSidebar={() => setSidebarOpen((o) => !o)}
+            creating={creating}
+            onNewNote={newNote}
+          />
+          <div className="grid min-h-0 flex-1 gap-3 max-md:contents md:grid-cols-[360px_minmax(0,1fr)] min-[1200px]:grid-cols-[420px_minmax(0,1fr)]">
+            <NotesList
+              title={viewTitle}
+              titleColor={viewColor}
+              notes={visibleNotes}
+              empty={empty}
+              emptyViewMessage={emptyViewMessage}
+              tags={tags}
+              selectedNoteId={selectedNoteId}
+              query={query}
+              filtersActive={selectedTagIds.length > 0}
+              onSelectNote={selectNote}
+              onClearFilters={clearFilters}
+            />
+            <NoteEditor
+              note={selectedNote}
+              draft={activeDraft}
+              dirty={dirty}
+              saving={saving}
+              deleting={deleting}
+              collections={collections}
+              tags={tags}
+              onDraftChange={setDraft}
+              onSave={() => void save()}
+              onCancel={() => selectedNote && setDraft({ title: selectedNote.title, body: selectedNote.body })}
+              onMove={(collectionId) =>
+                selectedNote && void act(() => data.moveNote(selectedNote.id, collectionId))
+              }
+              onAddTag={(name) => (selectedNote ? attempt(() => data.addTag(selectedNote.id, name)) : Promise.resolve(null))}
+              onRemoveTag={(tagId) =>
+                selectedNote && void act(() => data.removeTag(selectedNote.id, tagId))
+              }
+              onChangeTagColor={(id, color) => void act(() => data.changeTagColor(id, color))}
+              onDelete={() => selectedNote && setPending({ kind: "delete-note", note: selectedNote })}
+            />
+          </div>
+        </div>
       </main>
 
       <AlertDialog open={pending !== null} onOpenChange={(o) => !o && setPending(null)}>

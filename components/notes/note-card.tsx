@@ -7,13 +7,16 @@ type NoteCardProps = {
   tags: Tag[]; // all tags; the card resolves its own from note.tagIds
   selected: boolean;
   onSelect: (id: number) => void;
-  compact?: boolean; // sidebar variant: title and tags only
 };
 
-export function NoteCard({ note, tags, selected, onSelect, compact }: NoteCardProps) {
+export function NoteCard({ note, tags, selected, onSelect }: NoteCardProps) {
   const noteTags = note.tagIds
     .map((id) => tags.find((tag) => tag.id === id))
     .filter((tag): tag is Tag => tag !== undefined);
+  const date = new Date(note.updatedAt).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
 
   return (
     <button
@@ -21,24 +24,25 @@ export function NoteCard({ note, tags, selected, onSelect, compact }: NoteCardPr
       onClick={() => onSelect(note.id)}
       aria-current={selected ? "true" : undefined}
       className={cn(
-        "w-full rounded-md border px-3 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-        selected ? "border-primary bg-accent" : "border-transparent",
-        compact ? "py-1.5" : "border-border",
+        "block w-full border-b border-border/70 px-5 py-3 text-left transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+        selected &&
+          "bg-blue-50 shadow-[inset_3px_0_0_hsl(var(--primary))] hover:bg-blue-50 dark:bg-primary/15 dark:hover:bg-primary/15",
       )}
     >
-      <span className="block truncate text-sm font-medium">{note.title}</span>
-      {!compact && note.body && (
-        <span className="mt-0.5 line-clamp-2 block text-xs text-muted-foreground">
+      <span className="block truncate text-base font-semibold leading-5">{note.title}</span>
+      {note.body && (
+        <span className="mt-1 line-clamp-2 block text-[13px] leading-5 text-muted-foreground">
           {note.body}
         </span>
       )}
-      {noteTags.length > 0 && (
-        <span className="mt-1.5 flex flex-wrap gap-1">
+      <span className="mt-2 flex items-end justify-between gap-3">
+        <span className="flex flex-wrap gap-1.5">
           {noteTags.map((tag) => (
             <TagChip key={tag.id} tag={tag} />
           ))}
         </span>
-      )}
+        <span className="shrink-0 text-xs text-muted-foreground/80">{date}</span>
+      </span>
     </button>
   );
 }
