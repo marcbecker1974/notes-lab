@@ -11,7 +11,7 @@
 import { createClient } from "@/lib/supabase/client";
 
 // ---------------------------------------------------------------------------
-// Limits (mirror the CHECK constraints in the schema migration)
+// Limits in characters (mirror the CHECK constraints in the schema migration)
 // ---------------------------------------------------------------------------
 
 export const NOTE_TITLE_MAX = 200;
@@ -82,6 +82,14 @@ export class NotesDbError extends Error {
     this.kind = kind;
     this.operation = operation;
   }
+}
+
+function notFound(operation: string): NotesDbError {
+  return new NotesDbError(
+    "not_found",
+    operation,
+    "That item no longer exists. Refresh and try again.",
+  );
 }
 
 type DbError = { code?: string; message?: string } | null;
@@ -186,6 +194,12 @@ function toTag(row: TagRow): Tag {
   return { id: row.id, name: row.name, color: row.color };
 }
 
+// Postgres char_length counts characters (code points); String.length counts
+// UTF-16 units, which double-counts emoji. Count code points to match the checks.
+function charCount(value: string): number {
+  return Array.from(value).length;
+}
+
 // ---------------------------------------------------------------------------
 // Input validation (friendly errors before a request; the database still
 // enforces the same limits)
@@ -196,7 +210,7 @@ function cleanTitle(operation: string, title: string): string {
   if (value.length === 0) {
     throw new NotesDbError("validation", operation, "Please enter a title.");
   }
-  if (value.length > NOTE_TITLE_MAX) {
+  if (charCount(value) > NOTE_TITLE_MAX) {
     throw new NotesDbError(
       "validation",
       operation,
@@ -207,7 +221,7 @@ function cleanTitle(operation: string, title: string): string {
 }
 
 function checkBody(operation: string, body: string): string {
-  if (body.length > NOTE_BODY_MAX) {
+  if (charCount(body) > NOTE_BODY_MAX) {
     throw new NotesDbError(
       "validation",
       operation,
@@ -222,7 +236,7 @@ function cleanName(operation: string, name: string, what: string): string {
   if (value.length === 0) {
     throw new NotesDbError("validation", operation, `Please enter a ${what} name.`);
   }
-  if (value.length > NAME_MAX) {
+  if (charCount(value) > NAME_MAX) {
     throw new NotesDbError(
       "validation",
       operation,
@@ -242,7 +256,8 @@ export async function listNotes(): Promise<Note[]> {
     getClient()
       .from("notes")
       .select(NOTE_COLUMNS)
-      .order("updated_at", { ascending: false }),
+      .order("updated_at", { ascending: false })
+      .order("id", { ascending: false }), // tie-break: rows from one transaction share a timestamp
   );
   return rows.map(toNote);
 }
@@ -294,7 +309,7 @@ export async function deleteNote(id: number): Promise<void> {
   const rows = await run<{ id: number }[]>("deleteNote", () =>
     getClient().from("notes").delete().eq("id", id).select("id"),
   );
-  if (rows.length === 0) throw toNotesDbError("deleteNote", { code: "PGRST116" });
+  if (rows.length === 0) throw notFound("deleteNote");
 }
 
 // ---------------------------------------------------------------------------
@@ -321,7 +336,7 @@ export async function deleteCollection(id: number): Promise<void> {
   const rows = await run<{ id: number }[]>("deleteCollection", () =>
     getClient().from("collections").delete().eq("id", id).select("id"),
   );
-  if (rows.length === 0) throw toNotesDbError("deleteCollection", { code: "PGRST116" });
+  if (rows.length === 0) throw notFound("deleteCollection");
 }
 
 // ---------------------------------------------------------------------------
