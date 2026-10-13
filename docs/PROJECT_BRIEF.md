@@ -35,7 +35,7 @@ The official course list has 12 mandatory requirements. All must be met; each ha
 | R6 | The sidebar displays expandable collections. Selecting a collection expands it and shows its notes. Unassigned notes appear under "All notes" or "Uncollected". |
 | R7 | Users can create named collections directly from the sidebar. |
 | R8 | Users can assign notes to collections; changes persist in Supabase. |
-| R9 | Users can add and remove tags on notes; tags appear on note cards in the sidebar. |
+| R9 | Users can add and remove tags on notes; tags appear on the note cards in the notes list (changed in Feature 4: the sidebar no longer lists notes). |
 | R10 | Users can filter notes by multiple tags; only notes containing **all** selected tags are shown. |
 | R11 | Live search filters note titles and body content as the user types, combined with active tag filters. |
 | R12 | Clear empty-state messages appear for empty collections, searches without results, and unmatched tag filters. |
@@ -65,14 +65,14 @@ Beyond the 12 requirements, the app also needs basic **notes CRUD** (create, rea
 **Chosen optional task: note count badges.** Each collection in the sidebar shows the number of notes it contains, and the count updates when notes are created, deleted or moved between collections. It is built in its own feature branch and PR (E6). Acceptance criteria are in section 6.3.
 
 Other optional ideas, only if time permits after the above:
-1. **Colour-coded tags**: each tag has a colour shown wherever the tag appears. (Previously the first priority; the course-preferred badge task now comes first.)
+1. **Colour-coded tags and collections** (built in Feature 4, `feature/color-coded-tags-collections`): eight palette colours stored in the database, shown for collections (folder icon) and tags (dot and soft badge) and changeable from the UI. Scope change: collections got colours too.
 2. **Renaming collections.**
 
 ### 4.4 UI
 
 Modern **three-column layout**:
 
-- **Left (sidebar):** "All notes" and "Uncollected", expandable collections with their notes (R6), the tag filter, and note cards showing their tags (R9).
+- **Left (sidebar):** "All notes", then a Collections section ("Uncollected" first, then the collections as plain rows, with a "+" to create one) and a Tags section (filter rows with colour dots and counts, with a "+" to create a tag). The earlier expandable tree of notes under each collection was removed in Feature 4 to follow the original mockup; notes are listed in the middle column (R6, R9).
 - **Middle:** notes list reflecting the selected collection, active tag filters and the search query.
 - **Right:** note editor.
 
@@ -225,7 +225,7 @@ Each criterion is written so it can be checked individually, by inspection of th
 
 ### 6.6 Other optional features (when implemented)
 
-- **Colour-coded tags:** a tag's colour can be set and is displayed consistently in the sidebar, list and editor.
+- **Colour-coded tags and collections:** a tag's or collection's colour (one of eight) can be changed, persists after reload, and is shown consistently in the sidebar, list and editor; count badges stay neutral.
 - **Renaming collections:** a collection can be renamed and the new name persists.
 
 ## 7. Working Agreements

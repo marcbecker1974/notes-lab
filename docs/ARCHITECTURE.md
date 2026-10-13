@@ -42,7 +42,9 @@ User ─► React client components (/notes) ─► lib/notes-db.ts ─► supab
 
 Three columns, with a shared note-card component:
 
-- **Left sidebar:** "All notes" and "Uncollected", expandable collections each listing their notes as cards with tag chips (R6, R9), the create-collection control (R7), and the tag filter. Count badges (optional task) sit right-aligned on "All notes", "Uncollected" and every collection row, zero included. They are totals of the loaded notes, computed in memory by `countNotes` in `lib/notes-view.ts` (one pass, memoised on `notes`), so they ignore the tag filter and search and update at once on create, delete, move and collection delete. No extra queries. `components/notes/sidebar-panel.tsx` holds the responsive wrapper around the sidebar (overlay, backdrop, close button, Escape).
+- **Left sidebar (280px):** a "Notes Lab" header with a blue app icon, a primary blue "New note" button (the notes-list header keeps its own New note button, shown only at medium widths where the sidebar is collapsed), the "All notes" row, a "Collections" section and a "Tags" section. Each section heading has a small "+" button that opens an inline create form (`createCollection`; `createTag`, a standalone tag with no note). "Uncollected" is the first row under Collections, followed by the collections as plain selectable rows (coloured folder icon that opens the colour menu, name, neutral count, delete button overlaying the row on hover). Tags are vertical rows (colour dot that opens the colour menu, name that toggles the filter, neutral usage count). The selected view or active tag has a soft blue background. There is no expand/collapse tree: notes are listed only in the middle column (scope change, see PROJECT_BRIEF R6 and R9).
+- **Colours and counts in the UI (Feature 4 and 3):** collection rows show a coloured folder icon, tag rows a coloured dot, tag badges in the list and editor are soft-coloured, and the list header and editor collection select show the folder colour. Count badges (totals from `countNotes` and `countTagUses` in `lib/notes-view.ts`, memoised on `notes`, independent of tag filter and search) stay neutral gray. Colours change through `components/notes/color-swatch-menu.tsx` (a Radix dropdown with a 4 x 2 swatch grid), always a separate button from the name, so clicking a name keeps its action. `components/notes/sidebar-panel.tsx` holds the responsive wrapper (overlay, backdrop, close button, Escape).
+- **Notes list and editor:** list rows are separated by thin lines with a soft blue selected row (title, two-line preview, tag badges left, date right). The editor header shows the saved/unsaved line and Delete, Cancel (reverts the draft to the last saved text) and Save (the title appears only in the Title field); below it are labelled fields: Title \*, Collection and Tags side by side, and Content \* (a plain-text area; rich text is out of scope), with the existing tags offered only while the Tags field is focused or typed in (arrow keys move into the list, Escape closes it, a click outside closes it), and "Last saved" (from `updatedAt`, shown only when it parses) and the character counter underneath.
 - **Middle:** the filtered and searchable notes list (collection selection, AND tag filter and live search combined), rendered with the same note-card component, plus the search box and the empty states.
 - **Right:** the note editor (title, body, collection assignment, tags).
 
@@ -50,14 +52,14 @@ The sidebar tree and the middle list read from the same in-memory state, so a ch
 
 ### Implemented behaviour and responsive layout (decided 2026-10-13)
 
-- **Wide desktop (1200px and up):** three columns of 240px (sidebar), 360px (notes list) and the remaining width (editor). Each column scrolls on its own. Editor content is centred and limited to 900px.
+- **Wide desktop (1200px and up):** three columns of 280px (sidebar), 420px (notes list) and the remaining width (editor), following `docs/design/notes-lab-original-mockup.png`. Each column scrolls on its own. Editor content is centred and limited to 1100px. A shared top bar over columns 2 and 3 holds the search field (and, at medium widths, the sidebar toggle and a New note button). The app background is a light gray (`--app`, #F3F5F8); the sidebar, notes list and editor are three separate white surfaces with 12px gaps, 12px radii and thin borders, without shadows.
 - **Medium (768 to 1199px):** the collections sidebar is collapsible so the list and editor keep the width. It is hidden by default and opened with a toggle button in the notes-list header; it then appears as a 260px overlay with a close button. It also closes on Escape, a backdrop click, or when a collection or note is chosen. The list stays 360px.
-- **Below 768px:** the columns simply stack, with the sidebar always visible and no toggle. A dedicated mobile design is **not** part of the MVP (accepted).
+- **Below 768px:** the columns simply stack, with the sidebar always visible and no toggle. A dedicated mobile design is **not** part of the MVP (accepted). **Known limitation (follow-up task):** in this stacked layout the editor row is about 2px high, so a note cannot be edited below 768px; the fix is to let the page scroll on small screens, which changes the mobile layout and is not part of Feature 4.
 - **Editing:** explicit Save button with an "Unsaved changes" indicator. Switching notes with unsaved changes asks "Save and switch", "Discard changes" or "Cancel". The selected note stays selected when saving changes its list position (selection is by id).
 - **`updated_at`:** every note update, including moving a note between collections, bumps `updated_at` (the trigger has no `when` clause); the list is re-sorted locally by `updatedAt` then `id`, descending. Deleting a collection reloads the notes so their new `updated_at` values show. Adding or removing a tag changes `note_tags`, not the note row, so it does **not** bump `updated_at`.
 - **Unsaved changes:** protected when switching notes or creating a new one (dialog) and on reload, tab close or Back (browser `beforeunload` prompt while the draft is dirty). A save never overwrites text typed while it was in flight. There is no draft persistence and no conflict detection: two tabs editing the same note overwrite each other (last write wins).
 - **Deleting:** notes and collections are deleted after a confirmation dialog; deleting a collection keeps its notes (they become Uncollected).
-- **Not in this feature:** tag colours, tag deletion, collection renaming. (Count badges were added in the next feature, see below.)
+- **Not in this feature:** tag deletion, collection renaming. (Count badges and colours were added in later features, see below.)
 
 ## 3. Database schema and relationships
 
@@ -73,14 +75,14 @@ note_tags (note_id → notes.id ON DELETE CASCADE,
            tag_id  → tags.id  ON DELETE CASCADE,  PK (note_id, tag_id))
      ▲ many
      │ 1
-tags (id, name, color null, user_id)
+tags (id, name, color, user_id)        collections (… color …) likewise
 ```
 
 - A note belongs to at most one collection; `collection_id` null means uncategorised.
 - Notes and tags are many-to-many through `note_tags`.
 - **AND filter:** a note matches when it has every selected tag (`selected.every(id => note.tagIds.includes(id))`).
 - **Existing:** `public.notes(id, title, body, created_at)`. Its content column stays `body`. It needs `collection_id` and `updated_at` added, plus `user_id`.
-- **Colour-coded tags (optional, first priority):** the nullable `tags.color` column is included from the start so no later schema change is needed.
+- **Colours (Feature 4):** `collections.color` and `tags.color` are `text not null default 'slate'` with a CHECK against eight palette keys (`slate, red, amber, green, teal, blue, violet, pink`). The database stores the key, never a hex value. Migration `add_palette_colors` replaced the earlier hex check on `tags.color`, added the collections column and gave existing rows distinct colours (collections blue, green, amber; tags violet, teal, pink, red, by id). No grants or policies changed: the existing temporary update policies cover the new column. `lib/palette.ts` maps each key to full Tailwind class strings (soft 100/800 badge, 500 dot, 600 folder, dark variants) and picks the least-used colour for new items; `lib/notes-db.ts` validates keys (`setCollectionColor`, `setTagColor`, optional colour on create) and maps unknown values to slate. `tailwind.config.ts` scans `lib/` so those class names are generated.
 
 ### Auth-ready ownership design
 

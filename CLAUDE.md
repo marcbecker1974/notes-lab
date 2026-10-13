@@ -13,12 +13,12 @@ Read before working: `docs/PROJECT_BRIEF.md` (scope and acceptance criteria), `d
 - Out of scope: authentication, deployment, rich-text editing, AI features, file uploads, public sharing. Do not implement them. The template's `/auth/*` and `/protected` pages stay untouched and unused.
 - Reuse the existing project and Supabase setup. Do not add dependencies or services without asking.
 - UI: shadcn/ui components in `components/ui` (new-york style, Tailwind 3, imports `cn` from `@/lib/utils`), notes UI in `components/notes/`. Do not run `npx shadcn add` unattended: the 4.x CLI added unapproved packages (`cn`, the umbrella `radix-ui`) and imported `cn` from the wrong place. Write or review components by hand and add only the individual `@radix-ui/react-*` packages that are approved (currently `alert-dialog`, `checkbox`, `collapsible`, `dropdown-menu`, `label`, `scroll-area`, `select`, `separator`, `slot`).
-- Layout: three columns from 1200px; collapsible collections sidebar at 768 to 1199px; stacked below 768px (accepted for the MVP). Every note update, including collection moves, bumps `updated_at`.
+- Layout: three columns from 1200px; collapsible collections sidebar at 768 to 1199px; stacked below 768px (accepted for the MVP). **Known limitation:** below 768px the editor is not reachable (its grid row is about 2px high); fixing it is a separate follow-up task, not part of Feature 4. Every note update, including collection moves, bumps `updated_at`.
 - Scope changes are recorded in `docs/PROJECT_BRIEF.md`.
 
 ## Database access rules (centralised)
 
-- **All reads and writes of notes, collections and tags go through `lib/notes-db.ts`, using supabase-js.** No other file under `app/`, `components/` or `lib/` may call `supabase.from(...)` for those tables. Accepted exception: the starter's `components/tutorial/fetch-data-steps.tsx` (used only by the unused `/protected` page) still queries `notes`; leave it untouched. In the notes UI only `components/notes/use-notes-data.ts` imports `lib/notes-db.ts` for data access; components receive data and callbacks as props. Pure view logic (filter, search, order) lives in `lib/notes-view.ts`.
+- **All reads and writes of notes, collections and tags go through `lib/notes-db.ts`, using supabase-js.** No other file under `app/`, `components/` or `lib/` may call `supabase.from(...)` for those tables. Accepted exception: the starter's `components/tutorial/fetch-data-steps.tsx` (used only by the unused `/protected` page) still queries `notes`; leave it untouched. In the notes UI only `components/notes/use-notes-data.ts` imports `lib/notes-db.ts` for data access; components receive data and callbacks as props. Pure view logic (filter, search, order, counts) lives in `lib/notes-view.ts`; the colour palette lives in `lib/palette.ts` (colours are stored as palette keys, with full Tailwind class strings there, and `tailwind.config.ts` scans `lib/`).
 - The module obtains its client in one internal `getClient()` (the existing browser client from `lib/supabase/client.ts`). Never create a Supabase client at module scope on the server, create it per call.
 - Use explicit column lists, not `select('*')`. Fetch related rows with nested `select` (embedding) instead of extra requests.
 - Always check `error`. Functions return typed data or throw a typed `NotesDbError` with a user-safe message; raw Postgres errors do not reach the UI.
@@ -42,7 +42,7 @@ Read before working: `docs/PROJECT_BRIEF.md` (scope and acceptance criteria), `d
 ## Git workflow
 
 - Meaningful commit messages, Conventional Commits style (`feat(db): add collections and tags tables`). No "update" or "wip".
-- Planning docs go in the first commit on `main`. Application work goes on feature branches (`feature/db-schema-and-helper`, `feature/notes-ui`, `feature/collection-count-badges`) merged through pull requests.
+- Planning docs go in the first commit on `main`. Application work goes on feature branches (`feature/db-schema-and-helper`, `feature/notes-ui`, `feature/collection-count-badges`, `feature/color-coded-tags-collections`) merged through pull requests.
 - Check `git status` before every commit; never stage `.env.local` or `supabase/.temp/`.
 - Do not commit, push or create a repository or remote unless asked.
 - Before merging a PR, run a review slash command on its diff and record a real finding in `REFLECTION.md`. Also review one PR diff in a fresh Claude Code session and record a finding. Never invent findings.
