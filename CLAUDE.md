@@ -8,15 +8,17 @@ Read before working: `docs/PROJECT_BRIEF.md` (scope and acceptance criteria), `d
 
 ## Project rules
 
-- Stack: Next.js App Router, TypeScript, Tailwind CSS, Supabase PostgreSQL, supabase-js. Run locally with `npm run dev` (localhost:3000).
+- Stack: Next.js App Router, TypeScript, Tailwind CSS, shadcn/ui, Supabase PostgreSQL, supabase-js. Run locally with `npm run dev` (localhost:3000).
 - Next.js in this repo has breaking changes (see `AGENTS.md`): read the relevant guide in `node_modules/next/dist/docs/` before writing Next.js code.
 - Out of scope: authentication, deployment, rich-text editing, AI features, file uploads, public sharing. Do not implement them. The template's `/auth/*` and `/protected` pages stay untouched and unused.
 - Reuse the existing project and Supabase setup. Do not add dependencies or services without asking.
+- UI: shadcn/ui components in `components/ui` (new-york style, Tailwind 3, imports `cn` from `@/lib/utils`), notes UI in `components/notes/`. Do not run `npx shadcn add` unattended: the 4.x CLI added unapproved packages (`cn`, the umbrella `radix-ui`) and imported `cn` from the wrong place. Write or review components by hand and add only the individual `@radix-ui/react-*` packages that are approved (currently `alert-dialog`, `checkbox`, `collapsible`, `dropdown-menu`, `label`, `scroll-area`, `select`, `separator`, `slot`).
+- Layout: three columns from 1200px; collapsible collections sidebar at 768 to 1199px; stacked below 768px (accepted for the MVP). Every note update, including collection moves, bumps `updated_at`.
 - Scope changes are recorded in `docs/PROJECT_BRIEF.md`.
 
 ## Database access rules (centralised)
 
-- **All reads and writes of notes, collections and tags go through `lib/notes-db.ts`, using supabase-js.** No other file under `app/`, `components/` or `lib/` may call `supabase.from(...)` for those tables. Known exception until `feature/notes-ui`: the starter's `app/notes/page.tsx` still queries `notes` directly and is replaced there.
+- **All reads and writes of notes, collections and tags go through `lib/notes-db.ts`, using supabase-js.** No other file under `app/`, `components/` or `lib/` may call `supabase.from(...)` for those tables. Accepted exception: the starter's `components/tutorial/fetch-data-steps.tsx` (used only by the unused `/protected` page) still queries `notes`; leave it untouched. In the notes UI only `components/notes/use-notes-data.ts` imports `lib/notes-db.ts` for data access; components receive data and callbacks as props. Pure view logic (filter, search, order) lives in `lib/notes-view.ts`.
 - The module obtains its client in one internal `getClient()` (the existing browser client from `lib/supabase/client.ts`). Never create a Supabase client at module scope on the server, create it per call.
 - Use explicit column lists, not `select('*')`. Fetch related rows with nested `select` (embedding) instead of extra requests.
 - Always check `error`. Functions return typed data or throw a typed `NotesDbError` with a user-safe message; raw Postgres errors do not reach the UI.

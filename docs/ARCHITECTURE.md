@@ -1,6 +1,6 @@
 # Architecture: Notes Lab MVP
 
-Status: **database schema, temporary access policies and `lib/notes-db.ts` are implemented and applied (2026-10-13); the notes UI is not built yet.** `REFLECTION.md` records what was verified.
+Status: **database schema, temporary access policies, `lib/notes-db.ts` and the three-column notes UI are implemented (2026-10-13); the notes UI is on `feature/notes-ui` until its PR is merged.** `REFLECTION.md` records what was verified.
 
 Related: [PROJECT_BRIEF.md](./PROJECT_BRIEF.md)
 
@@ -17,8 +17,10 @@ Related: [PROJECT_BRIEF.md](./PROJECT_BRIEF.md)
 
 | Component | Role | Status |
 |---|---|---|
-| Next.js app (`/notes` route) | Three-column client UI: collections and tags / notes list / editor | `/notes` exists as a read-only list; UI to be built |
-| `lib/notes-db.ts` | The only module that talks to Supabase for notes data | Implemented (not yet used by the UI) |
+| Next.js app (`/notes` route) | `app/notes/page.tsx` is a thin server shell; `components/notes/` is the three-column client UI (sidebar / notes list / editor) built with shadcn/ui | Implemented |
+| `components/notes/use-notes-data.ts` | Loads notes, collections and tags once, calls `lib/notes-db.ts` and patches state with the returned rows; the only UI file that calls its data functions (components also import its constants and `NotesDbError` type for limits and messages) | Implemented |
+| `lib/notes-view.ts` | Pure in-memory view logic: collection view, AND tag filter, live search, ordering (no Supabase) | Implemented |
+| `lib/notes-db.ts` | The only module that talks to Supabase for notes data | Implemented and used by the UI |
 | supabase-js (browser client, `lib/supabase/client.ts`) | Data API client | Existing |
 | Supabase PostgreSQL (cloud) | Storage, migrations in `supabase/migrations/` | Existing project; 4 tables applied (migrations `…094205`, `…094206`, `…094208`) |
 
@@ -34,7 +36,7 @@ User ─► React client components (/notes) ─► lib/notes-db.ts ─► supab
 
 1. `/notes` loads once: all notes (with their tag ids), collections and tags.
 2. Filtering and search operate on that in-memory list: collection, then AND tag filter, then case-insensitive search over title and body. This gives instant results with no per-keystroke queries.
-3. Each write goes through `notes-db.ts`, then local state is updated with the returned row.
+3. Each write goes through `notes-db.ts`, then local state is updated with the returned row. Deleting a collection patches its notes to Uncollected locally and then re-syncs everything (to pick up their new `updated_at`); a `not_found` error (a row vanished, for example in another tab) also triggers a re-sync, and a collection view whose collection is gone falls back to "All notes".
 
 ### UI structure (decided)
 
@@ -45,6 +47,17 @@ Three columns, with a shared note-card component:
 - **Right:** the note editor (title, body, collection assignment, tags).
 
 The sidebar tree and the middle list read from the same in-memory state, so a change in one shows in the other at once.
+
+### Implemented behaviour and responsive layout (decided 2026-10-13)
+
+- **Wide desktop (1200px and up):** three columns of 240px (sidebar), 360px (notes list) and the remaining width (editor). Each column scrolls on its own. Editor content is centred and limited to 900px.
+- **Medium (768 to 1199px):** the collections sidebar is collapsible so the list and editor keep the width. It is hidden by default and opened with a toggle button in the notes-list header; it then appears as a 260px overlay with a close button. It also closes on Escape, a backdrop click, or when a collection or note is chosen. The list stays 360px.
+- **Below 768px:** the columns simply stack, with the sidebar always visible and no toggle. A dedicated mobile design is **not** part of the MVP (accepted).
+- **Editing:** explicit Save button with an "Unsaved changes" indicator. Switching notes with unsaved changes asks "Save and switch", "Discard changes" or "Cancel". The selected note stays selected when saving changes its list position (selection is by id).
+- **`updated_at`:** every note update, including moving a note between collections, bumps `updated_at` (the trigger has no `when` clause); the list is re-sorted locally by `updatedAt` then `id`, descending. Deleting a collection reloads the notes so their new `updated_at` values show. Adding or removing a tag changes `note_tags`, not the note row, so it does **not** bump `updated_at`.
+- **Unsaved changes:** protected when switching notes or creating a new one (dialog) and on reload, tab close or Back (browser `beforeunload` prompt while the draft is dirty). A save never overwrites text typed while it was in flight. There is no draft persistence and no conflict detection: two tabs editing the same note overwrite each other (last write wins).
+- **Deleting:** notes and collections are deleted after a confirmation dialog; deleting a collection keeps its notes (they become Uncollected).
+- **Not in this feature:** tag colours, tag deletion, collection renaming, count badges (next branch).
 
 ## 3. Database schema and relationships
 
@@ -161,7 +174,7 @@ How this architecture supports the 12 course requirements (R) and the evaluation
 
 | Req | Supported by | Status |
 |---|---|---|
-| R1 | `lib/notes-db.ts` as the only supabase-js access point (section 4) | Supported. The existing `app/notes/page.tsx` queries Supabase directly through the server client; it must be replaced or routed through the module. |
+| R1 | `lib/notes-db.ts` as the only supabase-js access point (section 4) | Implemented. `app/notes/page.tsx` no longer queries Supabase. One accepted exception remains: the starter's `components/tutorial/fetch-data-steps.tsx` (used only by the unused `/protected` page) still calls `supabase.from('notes')`; see `REFLECTION.md`. |
 | R2 | `notes` table with `updated_at` (section 3) | Supported; `updated_at` is maintained by a PostgreSQL trigger (decided). |
 | R3 | `collections(id, name, created_at, user_id)` | Supported; the extra `user_id` stays nullable (decided). |
 | R4 | `notes.collection_id`, nullable FK, `ON DELETE SET NULL` | Supported. |
@@ -195,4 +208,4 @@ How this architecture supports the 12 course requirements (R) and the evaluation
 | Existing auth pages kept untouched and unused | Smallest diff; ready for the future migration | Dead code in the meantime |
 | PostgREST embedding for joins; counts computed in memory | No extra queries needed for note count badges | None at this scale |
 
-Dependencies (existing in `package.json`): Next.js (`latest`, uses the `proxy.ts` convention; **read `node_modules/next/dist/docs/` before writing code**, per `AGENTS.md`), React 19, TypeScript, Tailwind CSS 3.x, `@supabase/supabase-js` and `@supabase/ssr` (`latest`), and the starter template's shadcn/Radix primitives in `components/ui`, which are present but not a decision. **The UI component library is undecided:** shadcn/ui, GitHub Primer and Material UI will be compared before the Notes UI is implemented, and the choice may add a dependency. Everything else adds no new dependencies.
+Dependencies (existing in `package.json`): Next.js (`latest`, uses the `proxy.ts` convention; **read `node_modules/next/dist/docs/` before writing code**, per `AGENTS.md`), React 19, TypeScript, Tailwind CSS 3.x, `@supabase/supabase-js` and `@supabase/ssr` (`latest`), and shadcn/ui primitives in `components/ui`. **UI library (decided): shadcn/ui + Tailwind CSS**, no other UI library. The notes UI added five Radix packages (`@radix-ui/react-alert-dialog`, `-collapsible`, `-scroll-area`, `-select`, `-separator`); the components were written in the repo's existing style against `@/lib/utils`. Everything else adds no new dependencies.
