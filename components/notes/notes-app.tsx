@@ -13,8 +13,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { X } from "lucide-react";
-
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { NotesDbError, type Collection, type Note } from "@/lib/notes-db";
@@ -22,7 +20,7 @@ import { filterNotes, type View } from "@/lib/notes-view";
 import { DemoBanner } from "./demo-banner";
 import { NoteEditor, type Draft } from "./note-editor";
 import { NotesList } from "./notes-list";
-import { Sidebar } from "./sidebar";
+import { SidebarPanel } from "./sidebar-panel";
 import { useNotesData } from "./use-notes-data";
 
 type Pending =
@@ -60,16 +58,6 @@ export function NotesApp() {
         : viewState,
     [viewState, collections],
   );
-
-  useEffect(() => {
-    // Escape that belongs to an open dialog or menu must not also close the sidebar.
-    if (!sidebarOpen || pending) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented) setSidebarOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [sidebarOpen, pending]);
 
   const selectedNote = notes.find((note) => note.id === selectedNoteId) ?? null;
   const activeDraft = selectedNote && draft ? draft : null;
@@ -295,52 +283,30 @@ export function NotesApp() {
         </Alert>
       )}
       <main className="relative grid min-h-0 flex-1 grid-rows-[auto_auto_minmax(0,1fr)] md:grid-cols-[360px_minmax(0,1fr)] md:grid-rows-1 min-[1200px]:grid-cols-[240px_360px_minmax(0,1fr)]">
-        {/* Medium widths: hidden until toggled, then an overlay. Wide and mobile: plain column. */}
-        <div
-          id="collections-panel"
-          className={
-            sidebarOpen
-              ? "flex min-h-0 flex-col md:max-[1199px]:absolute md:max-[1199px]:inset-y-0 md:max-[1199px]:left-0 md:max-[1199px]:z-30 md:max-[1199px]:w-[260px] md:max-[1199px]:bg-background md:max-[1199px]:shadow-xl"
-              : "flex min-h-0 flex-col md:max-[1199px]:hidden"
+        <SidebarPanel
+          open={sidebarOpen}
+          onOpenChange={setSidebarOpen}
+          suspendEscape={pending !== null}
+          notes={notes}
+          collections={collections}
+          tags={tags}
+          view={view}
+          expanded={expanded}
+          selectedNoteId={selectedNoteId}
+          selectedTagIds={selectedTagIds}
+          onSelectView={selectView}
+          onToggleExpanded={toggleExpanded}
+          onSelectNote={selectNote}
+          onToggleTag={(id) =>
+            setSelectedTagIds((cur) =>
+              cur.includes(id) ? cur.filter((t) => t !== id) : [...cur, id],
+            )
           }
-        >
-          <div className="hidden items-center justify-between border-b px-3 py-2 md:max-[1199px]:flex">
-            <span className="text-sm font-semibold">Collections</span>
-            <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Hide collections" onClick={() => setSidebarOpen(false)}>
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-          <div className="min-h-0 flex-1">
-            <Sidebar
-              notes={notes}
-              collections={collections}
-              tags={tags}
-              view={view}
-              expanded={expanded}
-              selectedNoteId={selectedNoteId}
-              selectedTagIds={selectedTagIds}
-              onSelectView={selectView}
-              onToggleExpanded={toggleExpanded}
-              onSelectNote={selectNote}
-              onToggleTag={(id) =>
-                setSelectedTagIds((cur) =>
-                  cur.includes(id) ? cur.filter((t) => t !== id) : [...cur, id],
-                )
-              }
-              onClearTags={clearFilters}
-              deleting={deleting}
+          onClearTags={clearFilters}
+          deleting={deleting}
           onCreateCollection={createCollection}
-              onDeleteCollection={(collection) => setPending({ kind: "delete-collection", collection })}
-            />
-          </div>
-        </div>
-        {sidebarOpen && (
-          <div
-            aria-hidden="true"
-            className="hidden md:max-[1199px]:fixed md:max-[1199px]:inset-0 md:max-[1199px]:z-20 md:max-[1199px]:block md:max-[1199px]:bg-black/30"
-            onClick={() => setSidebarOpen(false)}
-          />
-        )}
+          onDeleteCollection={(collection) => setPending({ kind: "delete-collection", collection })}
+        />
         <NotesList
           title={viewTitle}
           notes={visibleNotes}
