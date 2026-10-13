@@ -76,13 +76,15 @@ Modern **three-column layout**:
 - **Middle:** notes list reflecting the selected collection, active tag filters and the search query.
 - **Right:** note editor.
 
+*Responsive behaviour (decided):* three columns on wide desktop (1200px and up); at 768 to 1199px the collections sidebar is collapsible behind a visible toggle; below 768px the columns stack (a dedicated mobile design is out of scope for the MVP).
+
 *Decided:* the sidebar tree shows notes (with their tags) under their collection, the middle column shows the filtered and searched results, and both use a shared note-card component where appropriate. See ARCHITECTURE.md, section 2.
 
 ### 4.5 Technology
 
 - Next.js (App Router)
 - TypeScript
-- Tailwind CSS
+- Tailwind CSS with shadcn/ui components (decided for the notes UI)
 - Supabase PostgreSQL
 - supabase-js
 
@@ -126,7 +128,7 @@ Each criterion is written so it can be checked individually, by inspection of th
 
 **R2: notes table**
 - R2.1 `public.notes` has columns `id`, `title`, `body`, `created_at`, `updated_at`.
-- R2.2 `updated_at` is set on creation and changes whenever a note's title or body is edited (check by editing a note and comparing the value).
+- R2.2 `updated_at` is set on creation and changes whenever a note is updated, including edits of the title or body and moving the note to another collection (decided 2026-10-13; check by editing or moving a note and comparing the value).
 
 **R3: collections table**
 - R3.1 `public.collections` has columns `id`, `name`, `created_at`.
@@ -211,7 +213,7 @@ Each criterion is written so it can be checked individually, by inspection of th
 - A user can create a note, view it, edit its title and plain-text content, and delete it.
 - Changes persist in Supabase and remain after a page reload.
 - Deleting a note removes it from the list and clears the editor.
-- The three-column layout is implemented and usable at desktop widths.
+- The three-column layout is implemented and usable at desktop widths; at 768 to 1199px the sidebar is collapsible; below 768px the columns stack (accepted for the MVP).
 - The app builds without errors.
 
 ### 6.5 Security and architecture
@@ -265,6 +267,9 @@ Each branch is merged through its own PR (E7). Branch 3 satisfies E6.
 | Q1 | Keep the three-column layout: left = expandable collections with their notes and tags; middle = filtered, searchable notes list; right = editor. Shared note-card component where appropriate. |
 | Q2 | `notes.updated_at` is maintained by a PostgreSQL trigger. |
 | Q3 | `collections.user_id` stays nullable for future authentication compatibility. |
+| Q7 | UI library: shadcn/ui + Tailwind CSS (compared options Primer and Material UI not pursued). |
+| Q8 | Every note update, including collection moves, bumps `updated_at`; the trigger stays as is. |
+| Q9 | Responsive: three columns on wide desktop, collapsible sidebar at 768 to 1199px, stacked mobile layout accepted for the MVP. |
 | Q4 | Recommended review command for E8: `/code-review` (built-in, reviews a PR number, branch or diff and reports correctness findings). `/security-review` is a good second choice for the PR that adds the anon-access migration. Not executed yet. See the note below. |
 | Q5 | No GitHub remote is configured (`git remote -v` is empty). The GitHub CLI (`gh`) is installed and logged in. No repository has been created or pushed. |
 | Q6 | The first planning commit contains only `docs/PROJECT_BRIEF.md`, `docs/ARCHITECTURE.md`, `REFLECTION.md`, `.gitignore` and `CLAUDE.md`. |
