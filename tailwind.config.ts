@@ -8,10 +8,12 @@ export default {
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/**/*.{js,ts,jsx,tsx,mdx}",
+    "./lib/**/*.{js,ts,jsx,tsx}", // palette class names live in lib/palette.ts
   ],
   theme: {
     extend: {
       colors: {
+        app: "hsl(var(--app))",
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
         card: {

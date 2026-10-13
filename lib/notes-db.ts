@@ -10,6 +10,7 @@
 
 import "client-only"; // build error if a server module imports this browser-only module
 
+import { isPaletteKey, toPaletteKey, type PaletteKey } from "@/lib/palette";
 import { createClient } from "@/lib/supabase/client";
 
 // ---------------------------------------------------------------------------
@@ -37,13 +38,14 @@ export type Note = {
 export type Collection = {
   id: number;
   name: string;
+  color: PaletteKey;
   createdAt: string;
 };
 
 export type Tag = {
   id: number;
   name: string;
-  color: string | null;
+  color: PaletteKey;
 };
 
 export type NewNote = {
@@ -166,14 +168,14 @@ type NoteRow = {
   note_tags?: { tag_id: number }[] | null;
 };
 
-type CollectionRow = { id: number; name: string; created_at: string };
-type TagRow = { id: number; name: string; color: string | null };
+type CollectionRow = { id: number; name: string; color: string; created_at: string };
+type TagRow = { id: number; name: string; color: string };
 
 // Explicit column lists, never select('*'). note_tags(tag_id) embeds the tag
 // ids in the same request, via the foreign keys.
 const NOTE_COLUMNS =
   "id, title, body, collection_id, created_at, updated_at, note_tags(tag_id)";
-const COLLECTION_COLUMNS = "id, name, created_at";
+const COLLECTION_COLUMNS = "id, name, color, created_at";
 const TAG_COLUMNS = "id, name, color";
 
 function toNote(row: NoteRow): Note {
@@ -189,11 +191,11 @@ function toNote(row: NoteRow): Note {
 }
 
 function toCollection(row: CollectionRow): Collection {
-  return { id: row.id, name: row.name, createdAt: row.created_at };
+  return { id: row.id, name: row.name, color: toPaletteKey(row.color), createdAt: row.created_at };
 }
 
 function toTag(row: TagRow): Tag {
-  return { id: row.id, name: row.name, color: row.color };
+  return { id: row.id, name: row.name, color: toPaletteKey(row.color) };
 }
 
 // Postgres char_length counts characters (code points); String.length counts
@@ -246,6 +248,13 @@ function cleanName(operation: string, name: string, what: string): string {
     );
   }
   return value;
+}
+
+function checkColor(operation: string, color: string): PaletteKey {
+  if (!isPaletteKey(color)) {
+    throw new NotesDbError("validation", operation, "Please pick one of the listed colours.");
+  }
+  return color;
 }
 
 // ---------------------------------------------------------------------------
@@ -325,12 +334,23 @@ export async function listCollections(): Promise<Collection[]> {
   return rows.map(toCollection);
 }
 
-export async function createCollection(name: string): Promise<Collection> {
+/** `color` is optional: the database default (slate) applies when it is left out. */
+export async function createCollection(name: string, color?: PaletteKey): Promise<Collection> {
   const value = cleanName("createCollection", name, "collection");
+  const row: { name: string; color?: PaletteKey } = { name: value };
+  if (color !== undefined) row.color = checkColor("createCollection", color);
   const created = await run<CollectionRow>("createCollection", () =>
-    getClient().from("collections").insert({ name: value }).select(COLLECTION_COLUMNS).single(),
+    getClient().from("collections").insert(row).select(COLLECTION_COLUMNS).single(),
   );
   return toCollection(created);
+}
+
+export async function setCollectionColor(id: number, color: PaletteKey): Promise<Collection> {
+  const value = checkColor("setCollectionColor", color);
+  const updated = await run<CollectionRow>("setCollectionColor", () =>
+    getClient().from("collections").update({ color: value }).eq("id", id).select(COLLECTION_COLUMNS).single(),
+  );
+  return toCollection(updated);
 }
 
 /** Deletes a collection; its notes become uncollected (ON DELETE SET NULL). */
@@ -367,18 +387,24 @@ async function findTagByName(operation: string, name: string): Promise<Tag | nul
 
 /**
  * Adds a tag to a note, creating the tag if no tag with that name exists
- * (compared case-insensitively). Adding a tag that is already on the note is
- * not an error. Returns the tag.
+ * (compared case-insensitively); `newTagColor` applies only to a tag created
+ * here. Adding a tag that is already on the note is not an error. Returns the tag.
  */
-export async function addTagToNote(noteId: number, tagName: string): Promise<Tag> {
+export async function addTagToNote(
+  noteId: number,
+  tagName: string,
+  newTagColor?: PaletteKey,
+): Promise<Tag> {
   const operation = "addTagToNote";
   const name = cleanName(operation, tagName, "tag");
+  const colorRow: { color?: PaletteKey } = {};
+  if (newTagColor !== undefined) colorRow.color = checkColor(operation, newTagColor);
 
   let tag = await findTagByName(operation, name);
   if (!tag) {
     try {
       const created = await run<TagRow>(operation, () =>
-        getClient().from("tags").insert({ name }).select(TAG_COLUMNS).single(),
+        getClient().from("tags").insert({ name, ...colorRow }).select(TAG_COLUMNS).single(),
       );
       tag = toTag(created);
     } catch (error) {
@@ -397,6 +423,25 @@ export async function addTagToNote(noteId: number, tagName: string): Promise<Tag
       .upsert({ note_id: noteId, tag_id: tagId }, { onConflict: "note_id,tag_id", ignoreDuplicates: true }),
   );
   return tag;
+}
+
+/** Creates a tag on its own (no note). A name that already exists throws `duplicate`. */
+export async function createTag(name: string, color?: PaletteKey): Promise<Tag> {
+  const value = cleanName("createTag", name, "tag");
+  const row: { name: string; color?: PaletteKey } = { name: value };
+  if (color !== undefined) row.color = checkColor("createTag", color);
+  const created = await run<TagRow>("createTag", () =>
+    getClient().from("tags").insert(row).select(TAG_COLUMNS).single(),
+  );
+  return toTag(created);
+}
+
+export async function setTagColor(id: number, color: PaletteKey): Promise<Tag> {
+  const value = checkColor("setTagColor", color);
+  const updated = await run<TagRow>("setTagColor", () =>
+    getClient().from("tags").update({ color: value }).eq("id", id).select(TAG_COLUMNS).single(),
+  );
+  return toTag(updated);
 }
 
 /** Removes the link between a note and a tag. The tag itself is kept. */
