@@ -18,7 +18,7 @@ Related: [PROJECT_BRIEF.md](./PROJECT_BRIEF.md)
 | Component | Role | Status |
 |---|---|---|
 | Next.js app (`/notes` route) | `app/notes/page.tsx` is a thin server shell; `components/notes/` is the three-column client UI (sidebar / notes list / editor) built with shadcn/ui | Implemented |
-| `components/notes/use-notes-data.ts` | Loads notes, collections and tags once, calls `lib/notes-db.ts` and patches state with the returned rows; the only UI file that imports the module | Implemented |
+| `components/notes/use-notes-data.ts` | Loads notes, collections and tags once, calls `lib/notes-db.ts` and patches state with the returned rows; the only UI file that calls its data functions (components also import its constants and `NotesDbError` type for limits and messages) | Implemented |
 | `lib/notes-view.ts` | Pure in-memory view logic: collection view, AND tag filter, live search, ordering (no Supabase) | Implemented |
 | `lib/notes-db.ts` | The only module that talks to Supabase for notes data | Implemented and used by the UI |
 | supabase-js (browser client, `lib/supabase/client.ts`) | Data API client | Existing |
@@ -36,7 +36,7 @@ User ─► React client components (/notes) ─► lib/notes-db.ts ─► supab
 
 1. `/notes` loads once: all notes (with their tag ids), collections and tags.
 2. Filtering and search operate on that in-memory list: collection, then AND tag filter, then case-insensitive search over title and body. This gives instant results with no per-keystroke queries.
-3. Each write goes through `notes-db.ts`, then local state is updated with the returned row.
+3. Each write goes through `notes-db.ts`, then local state is updated with the returned row. Deleting a collection patches its notes to Uncollected locally and then re-syncs everything (to pick up their new `updated_at`); a `not_found` error (a row vanished, for example in another tab) also triggers a re-sync, and a collection view whose collection is gone falls back to "All notes".
 
 ### UI structure (decided)
 
@@ -54,7 +54,8 @@ The sidebar tree and the middle list read from the same in-memory state, so a ch
 - **Medium (768 to 1199px):** the collections sidebar is collapsible so the list and editor keep the width. It is hidden by default and opened with a toggle button in the notes-list header; it then appears as a 260px overlay with a close button. It also closes on Escape, a backdrop click, or when a collection or note is chosen. The list stays 360px.
 - **Below 768px:** the columns simply stack, with the sidebar always visible and no toggle. A dedicated mobile design is **not** part of the MVP (accepted).
 - **Editing:** explicit Save button with an "Unsaved changes" indicator. Switching notes with unsaved changes asks "Save and switch", "Discard changes" or "Cancel". The selected note stays selected when saving changes its list position (selection is by id).
-- **`updated_at`:** every note update, including moving a note between collections, bumps `updated_at` (the trigger has no `when` clause); the list is re-sorted locally by `updatedAt` then `id`, descending. Deleting a collection reloads the notes so their new `updated_at` values show.
+- **`updated_at`:** every note update, including moving a note between collections, bumps `updated_at` (the trigger has no `when` clause); the list is re-sorted locally by `updatedAt` then `id`, descending. Deleting a collection reloads the notes so their new `updated_at` values show. Adding or removing a tag changes `note_tags`, not the note row, so it does **not** bump `updated_at`.
+- **Unsaved changes:** protected when switching notes or creating a new one (dialog) and on reload, tab close or Back (browser `beforeunload` prompt while the draft is dirty). A save never overwrites text typed while it was in flight. There is no draft persistence and no conflict detection: two tabs editing the same note overwrite each other (last write wins).
 - **Deleting:** notes and collections are deleted after a confirmation dialog; deleting a collection keeps its notes (they become Uncollected).
 - **Not in this feature:** tag colours, tag deletion, collection renaming, count badges (next branch).
 

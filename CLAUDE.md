@@ -12,7 +12,7 @@ Read before working: `docs/PROJECT_BRIEF.md` (scope and acceptance criteria), `d
 - Next.js in this repo has breaking changes (see `AGENTS.md`): read the relevant guide in `node_modules/next/dist/docs/` before writing Next.js code.
 - Out of scope: authentication, deployment, rich-text editing, AI features, file uploads, public sharing. Do not implement them. The template's `/auth/*` and `/protected` pages stay untouched and unused.
 - Reuse the existing project and Supabase setup. Do not add dependencies or services without asking.
-- UI: shadcn/ui components in `components/ui` (new-york style, Tailwind 3, imports `cn` from `@/lib/utils`), notes UI in `components/notes/`. Do not run `npx shadcn add` unattended: the 4.x CLI added unapproved packages (`cn`, the umbrella `radix-ui`) and imported `cn` from the wrong place. Write or review components by hand and add only the individual `@radix-ui/react-*` packages that are approved.
+- UI: shadcn/ui components in `components/ui` (new-york style, Tailwind 3, imports `cn` from `@/lib/utils`), notes UI in `components/notes/`. Do not run `npx shadcn add` unattended: the 4.x CLI added unapproved packages (`cn`, the umbrella `radix-ui`) and imported `cn` from the wrong place. Write or review components by hand and add only the individual `@radix-ui/react-*` packages that are approved (currently `alert-dialog`, `checkbox`, `collapsible`, `dropdown-menu`, `label`, `scroll-area`, `select`, `separator`, `slot`).
 - Layout: three columns from 1200px; collapsible collections sidebar at 768 to 1199px; stacked below 768px (accepted for the MVP). Every note update, including collection moves, bumps `updated_at`.
 - Scope changes are recorded in `docs/PROJECT_BRIEF.md`.
 
