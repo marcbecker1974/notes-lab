@@ -178,9 +178,32 @@ A temporary script outside the repo (session scratchpad) ran an exact copy of `l
 - **Re-run after removing the test code:** `npm run lint`, `npx tsc --noEmit` and `npm run build` pass.
 - **Still untested:** use from real React components (first done by the UI feature) and `authenticated` users.
 
+### PR #1 review with `/code-review` (2026-10-13)
+
+PR: https://github.com/marcbecker1974/notes-lab/pull/1 (`feature/db-schema-and-helper` into `main`, four commits). I ran the `/code-review` skill against it; it returned 10 findings. **Caveat for E8:** `/code-review` ships with Claude Code, so it may not count as the course's "third-party slash command". The third-party candidates (`/full-review`, `/refactor-clean`) are not installed, and installing a third-party marketplace needs Marc's decision. This review therefore has not been confirmed as satisfying E8, and the PR is not merged.
+
+I checked each finding against the code and the live database before acting:
+
+| # | Finding | Verdict and action |
+|---|---|---|
+| 1 | Over-broad grants: UPDATE on `collections`, `tags`, `note_tags` that the module does not use | **Valid, accepted for now.** Collection rename and tag colour are planned optional features, and the temporary access is deliberately full CRUD. Narrowing needs a new migration (applied migrations are not edited); consider it with the auth migration. |
+| 2 | Schema migration lacks `revoke all` for the new tables | **Partly valid, accepted.** The revoke is in the temp migration, applied right after in the same push, and the rule in CLAUDE.md says "in the migration that grants access". The coupling is real: applying only migration 1 would leave default privileges. Not changed (applied). |
+| 3 | `ilike` lookup vs `lower(btrim(name))` index may disagree on some Unicode folding | **Plausible, not reproduced, deferred.** Worst case: a duplicate error for an exotic name. |
+| 4 | `addTagToNote` is not atomic and can leave an orphan tag | **Valid, already documented and accepted.** |
+| 5 | `listNotes` order is nondeterministic for rows with equal `updated_at` (seed rows share a timestamp) | **Valid. Fixed:** added `id` descending as a tie-break. Verified: seed notes list as 14, 13, 12, 11, 10. |
+| 6 | Client length checks count UTF-16 units, the database counts characters | **Valid. Fixed:** lengths now count code points. Verified: 20,000 emoji pass, 20,001 are rejected; a 200-emoji title passes, 201 fails. |
+| 7 | `run()` casts `null` to `T` | **Valid but low risk.** Internal only; every call site is typed for its query. Not changed. |
+| 8 | Fake `PGRST116` object used for "nothing deleted" | **Valid. Fixed:** a small `notFound()` helper throws the error directly and no fake `cause` is stored. |
+| 9 | Seed joins by title and name | **Not applicable.** One-shot seed, already applied on a database I checked for collisions; a re-run would abort on the unique indexes. |
+| 10 | `revoke execute … from public` leaves EXECUTE for `anon`/`authenticated`/`service_role` on `set_updated_at()` | **Incorrect.** The live ACL is `{postgres=X/postgres}` and `has_function_privilege` is false for all three roles. |
+
+**Fixes (one commit, `lib/notes-db.ts` only):** findings 5, 6 and 8. Re-verified: lint, `tsc` and build pass; a read-only run of the changed behaviour passed (order, emoji limits, not-found errors) and created no rows (counts still 8 notes, 3 collections, 4 tags, 7 links). The full 33-check runtime test was not repeated.
+
+**What the review showed about the process:** the reviewer found real defects in code I had verified end to end (ordering, Unicode length), and one claim that was wrong on the facts (finding 10). Checking each finding against the database before changing anything kept the fixes small.
+
 ### Outstanding technical checks
 1. ~~Run the rollback rehearsal~~ (done, passed). ~~Apply the migrations~~ (done). ~~REST smoke test~~ (done, 31/31). ~~`lib/notes-db.ts` implemented and runtime-tested~~ (33/33). Next: the Notes UI feature (approval pending), then the first commit.
 2. Revisit hardening `rls_auto_enable()` later (for example before deployment or when auth is added), after testing on a branch database whether `EXECUTE` is checked when the event trigger fires.
-3. Confirm that the review command is acceptable to the course, and install it before use.
+3. Decide whether `/code-review` satisfies E8 or whether a third-party command (`/full-review`) must be installed and run on a PR diff before merging; also still needed: a fresh-session review of a PR diff (E9).
 4. Compare shadcn/ui, GitHub Primer and Material UI and record the decision.
 (The earlier item "make the new-table migrations revoke default privileges" is done and applied in the temporary anon migration.)
