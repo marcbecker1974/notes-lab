@@ -8,6 +8,8 @@
 // - Every function returns typed data or throws NotesDbError with a user-safe
 //   message. Raw Postgres/PostgREST errors are kept only in `cause`.
 
+import "client-only"; // build error if a server module imports this browser-only module
+
 import { createClient } from "@/lib/supabase/client";
 
 // ---------------------------------------------------------------------------
@@ -350,13 +352,17 @@ export async function listTags(): Promise<Tag[]> {
   return rows.map(toTag);
 }
 
-// Case-insensitive exact match: escape the LIKE wildcards in the name.
+// Case-insensitive exact match, done in memory on the (small) tag list. A
+// server-side ilike is not exact: PostgREST treats `*` as a wildcard and offers
+// no escape for it, so "c*" would match "cat". Matching here also mirrors the
+// unique index, which compares lower(btrim(name)).
 async function findTagByName(operation: string, name: string): Promise<Tag | null> {
-  const pattern = name.replace(/[\\%_]/g, "\\$&");
+  const wanted = name.trim().toLowerCase();
   const rows = await run<TagRow[]>(operation, () =>
-    getClient().from("tags").select(TAG_COLUMNS).ilike("name", pattern).limit(1),
+    getClient().from("tags").select(TAG_COLUMNS).order("id"),
   );
-  return rows.length > 0 ? toTag(rows[0]) : null;
+  const match = rows.find((row) => row.name.trim().toLowerCase() === wanted);
+  return match ? toTag(match) : null;
 }
 
 /**
