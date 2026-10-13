@@ -112,7 +112,12 @@ export function useNotesData() {
     async (id: number) => {
       await deleteCollection(id);
       setCollections((current) => current.filter((c) => c.id !== id));
-      // The database moved its notes to "Uncollected" and bumped their updated_at.
+      // The database moved its notes to "Uncollected": mirror that locally so a failed
+      // refetch cannot leave notes pointing at a collection that is gone ...
+      setNotes((current) =>
+        current.map((note) => (note.collectionId === id ? { ...note, collectionId: null } : note)),
+      );
+      // ... then re-sync to pick up their new updated_at values.
       await refresh();
     },
     [refresh],

@@ -37,7 +37,7 @@ export function NotesApp() {
   const data = useNotesData();
   const { notes, collections, tags } = data;
 
-  const [view, setView] = useState<View>({ kind: "all" });
+  const [viewState, setView] = useState<View>({ kind: "all" });
   const [expanded, setExpanded] = useState<Set<number | "uncollected">>(new Set());
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [query, setQuery] = useState("");
@@ -50,12 +50,26 @@ export function NotesApp() {
   // Only used at medium widths (768-1199px), where the sidebar is a toggled overlay.
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  const [deleting, setDeleting] = useState(false);
+
+  // A collection that no longer exists (for example deleted in another tab) falls back to "All notes".
+  const view = useMemo<View>(
+    () =>
+      viewState.kind === "collection" && !collections.some((c) => c.id === viewState.id)
+        ? { kind: "all" }
+        : viewState,
+    [viewState, collections],
+  );
+
   useEffect(() => {
-    if (!sidebarOpen) return;
-    const onKey = (event: KeyboardEvent) => event.key === "Escape" && setSidebarOpen(false);
+    // Escape that belongs to an open dialog or menu must not also close the sidebar.
+    if (!sidebarOpen || pending) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) setSidebarOpen(false);
+    };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [sidebarOpen]);
+  }, [sidebarOpen, pending]);
 
   const selectedNote = notes.find((note) => note.id === selectedNoteId) ?? null;
   const activeDraft = selectedNote && draft ? draft : null;
@@ -63,6 +77,14 @@ export function NotesApp() {
     selectedNote !== null &&
     activeDraft !== null &&
     (activeDraft.title !== selectedNote.title || activeDraft.body !== selectedNote.body);
+
+  // Reload, tab close and Back would silently drop unsaved edits; ask the browser to confirm.
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
 
   const { notes: visibleNotes, empty } = useMemo(
     () => filterNotes(notes, view, selectedTagIds, query),
@@ -106,12 +128,16 @@ export function NotesApp() {
   const save = useCallback(async (): Promise<boolean> => {
     if (!selectedNote || !draft) return false;
     setSaving(true);
+    const sent = { title: draft.title, body: draft.body };
     const ok = await act(async () => {
-      const saved = await data.saveNote(selectedNote.id, {
-        title: draft.title,
-        body: draft.body,
-      });
-      setDraft({ title: saved.title, body: saved.body }); // the selection stays on this note
+      const saved = await data.saveNote(selectedNote.id, sent);
+      // Adopt the saved text only if the draft is still what was sent: text typed (or a
+      // different note opened) while the request ran must not be overwritten.
+      setDraft((current) =>
+        current && current.title === sent.title && current.body === sent.body
+          ? { title: saved.title, body: saved.body }
+          : current,
+      );
     });
     setSaving(false);
     return ok;
@@ -124,10 +150,17 @@ export function NotesApp() {
   };
 
   const selectNote = (id: number) => {
-    if (id === selectedNoteId) return;
+    if (id === selectedNoteId) {
+      setSidebarOpen(false);
+      return;
+    }
     const target = notes.find((note) => note.id === id);
-    if (target) guarded(() => open(target));
-    setSidebarOpen(false);
+    if (target) {
+      guarded(() => {
+        setSidebarOpen(false); // not when the unsaved-changes dialog is cancelled
+        open(target);
+      });
+    }
   };
 
   const selectView = (next: View) => {
@@ -154,6 +187,9 @@ export function NotesApp() {
           collectionId: view.kind === "collection" ? view.id : null,
         });
         open(note);
+        // The new note has no tags and the default title: keep it visible in the list.
+        setQuery("");
+        setSelectedTagIds([]);
       });
       setCreating(false);
     });
@@ -177,13 +213,17 @@ export function NotesApp() {
       if (choice === "save" && !(await save())) return;
       await current.proceed();
     } else if (current.kind === "delete-note") {
+      setDeleting(true);
       const ok = await act(() => data.removeNote(current.note.id));
+      setDeleting(false);
       if (ok && selectedNoteId === current.note.id) {
         setSelectedNoteId(null);
         setDraft(null);
       }
     } else {
+      setDeleting(true);
       const ok = await act(() => data.removeCollection(current.collection.id));
+      setDeleting(false);
       if (ok) {
         setView((v) =>
           v.kind === "collection" && v.id === current.collection.id ? { kind: "all" } : v,
@@ -288,7 +328,8 @@ export function NotesApp() {
                 )
               }
               onClearTags={clearFilters}
-              onCreateCollection={createCollection}
+              deleting={deleting}
+          onCreateCollection={createCollection}
               onDeleteCollection={(collection) => setPending({ kind: "delete-collection", collection })}
             />
           </div>
@@ -322,6 +363,7 @@ export function NotesApp() {
           draft={activeDraft}
           dirty={dirty}
           saving={saving}
+          deleting={deleting}
           collections={collections}
           tags={tags}
           onDraftChange={setDraft}

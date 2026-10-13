@@ -22,6 +22,7 @@ type SidebarProps = {
   expanded: Set<number | "uncollected">;
   selectedNoteId: number | null;
   selectedTagIds: number[];
+  deleting: boolean;
   onSelectView: (view: View) => void;
   onToggleExpanded: (key: number | "uncollected") => void;
   onSelectNote: (id: number) => void;
@@ -143,6 +144,7 @@ export function Sidebar(props: SidebarProps) {
                       size="icon"
                       className="h-7 w-7 shrink-0 opacity-0 focus-visible:opacity-100 group-hover:opacity-100"
                       aria-label={`Delete collection ${collection.name}`}
+                      disabled={props.deleting}
                       onClick={() => props.onDeleteCollection(collection)}
                     >
                       <Trash2 className="h-3.5 w-3.5" />

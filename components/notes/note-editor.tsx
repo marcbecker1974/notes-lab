@@ -34,6 +34,7 @@ type NoteEditorProps = {
   draft: Draft | null;
   dirty: boolean;
   saving: boolean;
+  deleting: boolean;
   collections: Collection[];
   tags: Tag[];
   onDraftChange: (draft: Draft) => void;
@@ -77,7 +78,7 @@ export function NoteEditor(props: NoteEditorProps) {
           {props.dirty ? "Unsaved changes" : "All changes saved"}
         </p>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={props.onDelete}>
+          <Button variant="outline" size="sm" onClick={props.onDelete} disabled={props.deleting}>
             <Trash2 /> Delete
           </Button>
           <Button
