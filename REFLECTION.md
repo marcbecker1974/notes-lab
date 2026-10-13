@@ -2,7 +2,7 @@
 
 ## Planning and Architecture Decisions
 
-Status: planning only. Nothing described here has been implemented yet. Details are in [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Status of this first section: it records the planning decisions made before implementation. Later sections record what was actually implemented and verified. Details are in [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ### Why PROJECT_BRIEF.md was introduced
 - **Rationale:** to fix the agreed scope (mandatory vs. optional features, exclusions, acceptance criteria) in one place before building, so later decisions can be checked against it.
@@ -95,8 +95,92 @@ Status: planning only. Nothing described here has been implemented yet. Details 
 
 **UI component library.** Deliberately left undecided. shadcn/ui, GitHub Primer and Material UI are to be compared before the Notes UI is implemented. The repo already contains shadcn-style primitives from the starter template (`components/ui`, Radix), but that is not a decision.
 
+### Final pre-Phase-C migration review (2026-10-13, read-only; nothing applied)
+
+Review of the three remaining migrations (schema, seed, temporary anon access) against the live Postgres 17.11 database, using read-only queries and the official docs. No migration was executed, and no SQL parser has run on the files yet.
+
+**Results.**
+- **Syntax, order and version:** reads clean; objects are created before they are referenced. `unique … nulls not distinct` is supported (Postgres 15+). The expression index uses only immutable functions. The `default auth.uid() references auth.users` pattern was already used by an applied migration. Nothing is confirmed by execution.
+- **Existing data:** the 3 notes (titles up to 13 characters, bodies up to 28, none blank) satisfy the new check constraints. No new name collides with an existing object.
+- **Identity sequences:** no sequence grant is included. The PostgreSQL docs read do not say whether an identity insert by `anon` needs sequence privileges; I expect it does not, but this is **unverified**. The rehearsal tests it through `collections` and `tags`.
+- **`updated_at` trigger under `anon`:** the function is `SECURITY INVOKER` and only sets `new.updated_at`. The docs do not say whether `EXECUTE` is re-checked when the trigger fires, so this is **unverified** and tested in the rehearsal.
+- **Scope:** grants and the 16 policies name only `notes`, `collections`, `tags` and `note_tags`. No `all tables`, `all sequences` or `alter default privileges`.
+- **Seed:** inserts only, no `UPDATE`, `DELETE` or `ON CONFLICT`; existing ids 1–3 untouched. A name collision would abort the whole file through the unique indexes rather than overwrite anything.
+- **Low residual risks:** `anon` can set `user_id` explicitly (the foreign key rejects non-existent users, and none exist yet); the CLI is believed to apply each migration file atomically, but this is unconfirmed.
+
+**Why the `rls_auto_enable()` hardening migration was deferred (decision: Marc Becker, after my recommendation).**
+- No application code calls the function, and it protects nothing in Notes Lab because the new tables enable RLS explicitly.
+- Practical risk is probably low: the function uses `pg_event_trigger_ddl_commands()`, which only works inside an event trigger (not tested).
+- The revoke has its own unverified risk: if `EXECUTE` is re-checked when the event trigger fires, the revoke could silently stop automatic RLS on tables created through the dashboard.
+- The file `…_harden_rls_auto_enable.sql` was created, never applied or committed, and then deleted from the branch.
+- **Trade-off:** the security advisor warnings stay.
+
+**Remaining Supabase security advisor warnings (as last read, before any new migration).** Two warnings for `public.rls_auto_enable()`: it is `SECURITY DEFINER` and executable by `anon` and by `authenticated` through the default `PUBLIC` privilege (callable at `/rest/v1/rpc/rls_auto_enable`). They are known and accepted for the MVP. The advisor will be re-run after the migrations are applied to check that no new warnings appear.
+
+**Transaction probe (2026-10-13).** `supabase db query --linked` posts to the write-capable `/v1/projects/{ref}/database/query` endpoint (not `/read-only`) and runs as `postgres`. Three probes with `begin` … `rollback` showed: (1) statements share one session (a temp table persisted across statements); (2) `rollback` undid a `create table` plus insert in `public`; (3) a failing statement (`1/0`) returned HTTP 400 and left nothing behind. Afterwards no probe objects, no idle transactions, and `notes` unchanged. Not shown: how the server ends an aborted transaction (closed connection or explicit rollback); the result is the same.
+
+**Rollback rehearsal of the three migrations (2026-10-13): PASSED, nothing persisted.** One file: `begin`, `set local lock_timeout 3s / statement_timeout 15s / idle_in_transaction_session_timeout 30s`, the three migrations verbatim, checks T0–T4, `rollback` (no `COMMIT` anywhere). The file returned its final `REHEARSAL PASSED` row, which is only reached if every check passed; the CLI prints only that last result, so the checks are reported as a group, not individually.
+- T0 preconditions and 8 notes after the seed; T1 RLS on 4 tables, 16 policies, trigger present, `anon`/`authenticated` hold only `SELECT, INSERT, UPDATE, DELETE`, no `TRUNCATE` for `anon`, seed counts 3/4/7, originals' `updated_at` backfilled; T3 as `anon`: inserts into `collections` and `tags` (identity columns, no sequence grant) worked, and updating a disposable note changed `updated_at` to `now()` while `created_at` stayed; T4 the 3 original notes unchanged. This answers two open points: **`anon` needs no sequence grant for identity inserts**, and **the `updated_at` trigger fires under `anon`** with `EXECUTE` revoked from `public`.
+- **Before/after snapshots (`state.sql`):** identical (8 applied migrations, notes columns `id,title,body,created_at`, same notes fingerprint, 3 rows, the 2 original policies, no trigger, no new tables, no idle transactions, no `TEMP` policies) **except `notes_id_seq`: 3 → 9.** That is the expected non-transactional sequence change: 5 seed notes plus 1 disposable note. The next real note will get id 10; ids 4–9 are an unused gap. Nothing else differed.
+- Not tested by the rehearsal: behaviour of the REST API (PostgREST schema cache, publishable key), `anon` update/delete of other tables, a concurrent `/notes` request during the lock, and whether `db push` records the history entries identically.
+
+### Phase C: migrations applied to the live database (2026-10-13)
+
+On branch `feature/db-schema-and-helper`, `migration list --linked` showed 8 applied and 3 pending; `db push --linked --dry-run` listed exactly `…094205_add_collections_tags_schema`, `…094206_seed_sample_journal_data`, `…094208_temp_anon_access`, in that order. `db push --linked` then applied all three without errors. Read-only verification afterwards:
+- **Migrations:** 11 applied (the 8 old plus the 3 new); nothing unexpected.
+- **Tables and RLS:** `notes`, `collections`, `tags`, `note_tags` exist, RLS enabled (not forced) on all four.
+- **Columns:** `notes` gained `collection_id`, `updated_at` (not null, default `now()`) and `user_id` (default `auth.uid()`); `collections` and `tags` have `user_id`, `tags.color` is nullable.
+- **Constraints and indexes:** primary keys, foreign keys (`user_id`, `collection_id`, both `note_tags` keys), `notes_title_length`, `notes_body_length`, name and colour checks; unique case-insensitive name indexes on `collections` and `tags`, plus the three planned indexes.
+- **Trigger:** `notes_set_updated_at` (before update, enabled) calls `set_updated_at()`, which is `SECURITY INVOKER` with an empty `search_path` and `EXECUTE` for `postgres` only.
+- **Policies:** exactly 16, all `TEMP anon <op> <table>` for roles `anon, authenticated`; the two old `notes` select policies are gone.
+- **Grants:** `anon` and `authenticated` hold only `SELECT, INSERT, UPDATE, DELETE` on the four tables. `service_role` still holds Supabase's default `REFERENCES, TRIGGER, TRUNCATE` (not touched, never used by the app). `anon` has no sequence privileges and no `CREATE` on `public`, confirming identity inserts need none.
+- **Original notes:** ids 1–3 are unchanged (same fingerprint as before the migrations); `updated_at = created_at`, `collection_id` and `user_id` null.
+- **Sample data:** 5 new notes (ids 10–14, after the 6 values burned by the rehearsal), 3 collections, 4 tags, 7 note-tag links; the collection assignments and links match the seed (`Agents and tool use` uncollected, `AI Agents` empty).
+- **Security advisor (`db advisors --linked --type security`):** exactly the two known warnings for `public.rls_auto_enable()` (executable by `anon` and by `authenticated`). No new warnings from the new tables or policies. Accepted, hardening deferred (see above).
+- **Method note:** my first verification query showed no trigger only because of a filter on `regclass` text; a direct query confirmed it. Two earlier verify queries also failed on `text || "char"` casts before any result was read. Neither touched data.
+- The REST smoke test followed (next section).
+
+### REST smoke test with the publishable key (2026-10-13): 31/31 PASS
+
+A throwaway Node script (kept outside the repo, in the session scratchpad) used `@supabase/supabase-js` with only `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` from `.env.local` (nothing printed; no secret key involved). It did not use `lib/notes-db.ts`, which does not exist yet. All records were disposable (`ZZ-SMOKE-<timestamp>` names).
+- **Reads:** notes with embedded `note_tags(tag_id)` (8 notes, 7 links, one request), collections (3), tags (4).
+- **Round trip:** created a collection, tag and note; assigned the note to the collection; added a tag with `upsert(..., { ignoreDuplicates: true })` (repeating it caused no error and left one row); removed the tag; updated the note, and `updated_at` advanced (11:35:13.5 → 11:35:15.1, set by the trigger, not sent by the client) while `created_at` stayed; deleted note, tag and collection (`.delete().select()` returned the deleted row each time).
+- **Error codes as mapped in `docs/SUPABASE_REFERENCES.md`:** duplicate collection name with different case and spaces and duplicate tag name with different case → `23505`; note with a nonexistent collection and `note_tags` with a nonexistent tag → `23503`; empty title, whitespace-only title, 201-character title, 20,001-character body, 51-character collection name and an invalid tag colour → `23514` (so `23514` reaches the client as a check violation, as predicted); `single()` with no row → `PGRST116`. A title of exactly 200 characters is accepted.
+- **Cascades:** deleting a note removes its `note_tags` rows; deleting a tag removes its `note_tags` rows (note kept); deleting a collection leaves its note with `collection_id = null`.
+- **Cleanup and integrity:** no `ZZ-SMOKE` rows or test notes remained (checked through the API and directly in SQL); the 8 notes (ids 1–3, 10–14) are identical in id, title, body, timestamps and collection to before the run; counts are 8 notes, 3 collections, 4 tags, 7 links.
+- **Side effect:** identity sequences advanced (`notes_id_seq` 14 → 24, `collections_id_seq` 7, `tags_id_seq` 8). The next real ids will be higher with gaps; harmless.
+- **No unexpected behaviour.** The test only shows that this works for `anon`; it does not test concurrency or `authenticated` users. Insert, update and delete by `anon` work, as expected for the temporary anonymous access, and the data stays publicly writable until that migration is replaced.
+
+### `lib/notes-db.ts` implemented (2026-10-13)
+
+The module follows `docs/ARCHITECTURE.md` section 4 and the database access rules in `CLAUDE.md`. It is not used by any UI yet.
+- **API:** `listNotes`, `createNote`, `updateNote`, `setNoteCollection`, `deleteNote`; `listCollections`, `createCollection`, `deleteCollection`; `listTags`, `addTagToNote`, `removeTagFromNote`. Collection rename and tag colour are left out (optional in the plan).
+- **Types:** `Note`, `Collection`, `Tag` in camelCase without `user_id`; row types stay internal and are mapped at the boundary. Hand-written, not generated.
+- **One client seam:** a private `getClient()` calls the existing browser client's `createClient()` on every call (no client at module scope). Swapping in an authenticated or server client later means editing that function. Because it uses the browser client, the module is meant for client components.
+- **One request per read:** `listNotes` embeds `note_tags(tag_id)` and uses explicit column lists (no `select('*')`). The same select, including the embed, is used on insert and update so every write returns a complete `Note` (see the open point below).
+- **Errors:** every call goes through one helper `run()`, which turns returned and thrown errors (for example a network failure) into `NotesDbError` with `kind`, `operation`, a user-safe `message` and the original as `cause`. Mapping, taken from the smoke test: `23505` → duplicate, `23503` and `PGRST116` → not found, `23514` → invalid, `42501` → forbidden, anything else → unknown. Messages never mention roles, `anon` or SQL.
+- **Validation before the request:** titles and names are trimmed and checked against exported limits (`NOTE_TITLE_MAX` 200, `NOTE_BODY_MAX` 20000, `NAME_MAX` 50) that mirror the check constraints, so users get a friendly message; the database stays the final authority. The body is stored as typed (not trimmed). A `null` body is returned as `""`.
+- **Deletes check the result:** `deleteNote` and `deleteCollection` select the deleted row and throw "not found" if nothing was deleted, because a delete that RLS or a missing row turns into zero rows would otherwise look like success. `removeTagFromNote` does not check, so removing a link that is already gone succeeds (idempotent).
+- **`addTagToNote`:** finds the tag case-insensitively with `ilike` (LIKE wildcards in the name are escaped), creates it if missing, retries the lookup if a concurrent request created it first (`23505`), then links with `upsert(..., { ignoreDuplicates: true })`, which the smoke test showed is idempotent. It is not one database transaction: if the link step fails, a newly created tag stays as an unused tag. Accepted for a small single-user app.
+- **Not in the module:** filtering, search, AND-tag filtering and count badges (in memory in the UI), anything about `user_id`, roles or auth.
+- **Verification:** `npm run lint` and `npx tsc --noEmit` pass with no output; `npm run build` succeeds with all routes as before. A grep shows `.from(` only in `lib/notes-db.ts`, the known `app/notes/page.tsx` (to be replaced in the UI feature) and the starter's tutorial code strings. Existing pages are unchanged.
+- **Runtime test (below):** the earlier open point about the embed in returned rows is now verified.
+
+#### Runtime test of the module (2026-10-13): 33/33 PASS
+
+A temporary script outside the repo (session scratchpad) ran an exact copy of `lib/notes-db.ts` (only the client import line differed, checked with `diff`) against the live database with the publishable key, using `ZZ-RT-<timestamp>` records. It was deleted afterwards; nothing was added to the repo.
+- **Reads:** `listNotes` returns 8 camelCase notes, newest `updatedAt` first, 7 tag ids embedded, no `user_id`; `listCollections` returns 3, `listTags` 4.
+- **Writes return complete notes:** the `note_tags(tag_id)` embed **works in the returned row of insert and update** (`createNote`, `updateNote`, `setNoteCollection` all returned correct `tagIds`), which settles the earlier doubt.
+- **CRUD:** `createCollection` (trims); `createNote` (trims the title, defaults body `""` and collection `null`); `updateNote` (`updatedAt` advanced by the trigger, `createdAt` unchanged, a body-only patch keeps the title); `setNoteCollection` (move, to null, back); `addTagToNote` (creates the tag, reuses it for other case or spacing, no duplicate link, two concurrent calls with a new name both succeed with the same tag, `a_b` and `aXb` stay separate tags so the `ilike` wildcard escaping works); `removeTagFromNote` (repeat is not an error, the tag stays); `deleteCollection` (note kept, collection null); `deleteNote` (no `note_tags` rows left).
+- **Errors:** every error case threw `NotesDbError` with the expected `kind` (`duplicate`, `validation`, `not_found`), `operation` set, `cause` kept for database errors, and a message with no mention of anon, Postgres, constraints or SQL. Covered: duplicate collection, empty and over-long names, titles and bodies, nonexistent collection, note and tag targets, empty patch.
+- **Observed limitation (as documented):** `addTagToNote` on a nonexistent note first creates the tag and then fails on the link, which leaves an unused tag; the cleanup sweep removed it. The UI always passes an existing note, so this is accepted.
+- **Cleanup and integrity:** no `ZZ-RT` rows remained (checked through the module and directly in SQL); the 8 notes (ids 1–3, 10–14) and their fingerprint are unchanged; counts are 8 notes, 3 collections, 4 tags, 7 links. The module has no tag delete, so the test script removed its test tags with its own client. Sequences advanced again (harmless gaps).
+- **Re-run after removing the test code:** `npm run lint`, `npx tsc --noEmit` and `npm run build` pass.
+- **Still untested:** use from real React components (first done by the UI feature) and `authenticated` users.
+
 ### Outstanding technical checks
-1. Write the migration that revokes `rls_auto_enable()` execution, and verify with the advisor and a new-table test (not yet done).
-2. Make the new-table migrations revoke the default extra privileges before granting (not yet done).
+1. ~~Run the rollback rehearsal~~ (done, passed). ~~Apply the migrations~~ (done). ~~REST smoke test~~ (done, 31/31). ~~`lib/notes-db.ts` implemented and runtime-tested~~ (33/33). Next: the Notes UI feature (approval pending), then the first commit.
+2. Revisit hardening `rls_auto_enable()` later (for example before deployment or when auth is added), after testing on a branch database whether `EXECUTE` is checked when the event trigger fires.
 3. Confirm that the review command is acceptable to the course, and install it before use.
 4. Compare shadcn/ui, GitHub Primer and Material UI and record the decision.
+(The earlier item "make the new-table migrations revoke default privileges" is done and applied in the temporary anon migration.)

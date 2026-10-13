@@ -18,7 +18,7 @@ Related: [PROJECT_BRIEF.md](./PROJECT_BRIEF.md)
 | Component | Role | Status |
 |---|---|---|
 | Next.js app (`/notes` route) | Three-column client UI: collections and tags / notes list / editor | `/notes` exists as a read-only list; UI to be built |
-| `lib/notes-db.ts` | The only module that talks to Supabase for notes data | To be created |
+| `lib/notes-db.ts` | The only module that talks to Supabase for notes data | Implemented (not yet used by the UI) |
 | supabase-js (browser client, `lib/supabase/client.ts`) | Data API client | Existing |
 | Supabase PostgreSQL (cloud) | Storage, migrations in `supabase/migrations/` | Existing project; 4 tables to be added |
 
@@ -106,12 +106,12 @@ Planned API:
 - **Policies:** exactly two, both `SELECT` with `using (true)`: `Authenticated users can view notes` (role `authenticated`) and `Notes are viewable by everyone` (role `public`, so it covers `anon` as well). There are no insert, update or delete policies.
 - **Grants:** `anon` and `authenticated` each hold `SELECT` plus `REFERENCES`, `TRIGGER` and `TRUNCATE` (and, on Postgres 17, `MAINTAIN`). The migration only grants `SELECT`; the other privileges come from Supabase's default privileges, which give `anon`, `authenticated` and `service_role` `TRUNCATE`, `REFERENCES`, `TRIGGER` and `MAINTAIN` on every table created by `postgres`. `INSERT`, `UPDATE` and `DELETE` are not granted, so writes are denied both by the missing grants and by the missing policies.
 - Consequence: **every new table will arrive with these extra privileges**. `TRUNCATE` is not subject to RLS, so the migrations for the four new tables must `revoke all` from `anon` and `authenticated` first and then grant only the needed privileges (`select, insert, update, delete`). Whether `TRUNCATE` is reachable through the Data API has not been tested; the revoke removes the question.
-- **`public.rls_auto_enable()`:** a Supabase-provided `SECURITY DEFINER` function, owned by `postgres`, used by the `ensure_rls` event trigger that enables RLS on new tables in `public`. It is executable by `anon` and `authenticated` (through the default `PUBLIC` privilege), which the security advisor flags as two warnings. See REFLECTION.md for the investigation and the recommended restriction, which belongs in a later migration.
+- **`public.rls_auto_enable()`:** a Supabase-provided `SECURITY DEFINER` function, owned by `postgres`, used by the `ensure_rls` event trigger that enables RLS on new tables in `public`. It is executable by `anon` and `authenticated` (through the default `PUBLIC` privilege), which the security advisor flags as two warnings. See REFLECTION.md for the investigation. Restricting it was **deferred** (not needed for the MVP); the two advisor warnings stay open and accepted.
 
 ### Planned policy approach (not yet created)
 
 - A **dedicated migration** (e.g. `…_temp_anon_access.sql`) holds all `to anon, authenticated` CRUD policies and grants for the four tables, and nothing else. Policies are named `TEMP anon …`, and the file carries a header comment explaining why it exists and when to delete it.
-- Schema and RLS-enablement migrations do not mention `anon`.
+- Schema and RLS-enablement migrations create no `anon` policies or grants.
 - The old "everyone" and duplicate select policies are replaced, leaving one policy set per table.
 - `anon` gets nothing outside these four tables. The service-role key is never used.
 - Table checks limit the size of what anonymous users can write (see section 3).

@@ -28,7 +28,10 @@ Read before working: `docs/PROJECT_BRIEF.md` (scope and acceptance criteria), `d
 - Schema changes are SQL migrations in `supabase/migrations/` (create with `npx supabase migration new <name>`). Never edit an applied migration; add a new one. Do not change the live database by hand.
 - Enable RLS on every table. Write one policy per operation and always name the role with `to`.
 - Granting access takes both a policy and a `grant`; adding policies does not remove existing grants.
-- Anonymous (`anon`) access exists only in the single temporary migration (policies named `TEMP anon …`). No other migration mentions `anon`. Use only non-sensitive sample data while it is enabled.
+- **Default privileges:** Supabase gives `anon`, `authenticated` and `service_role` `TRUNCATE`, `REFERENCES`, `TRIGGER` and `MAINTAIN` on every new table created by `postgres`, and `TRUNCATE` is not subject to RLS. Do not change the project-wide default privileges (no `alter default privileges`); handle each table individually.
+- **Every new table needs its own `revoke all on table … from anon, authenticated;` before any `grant`**, in the same migration that grants access. Then grant only the operations the app uses, one table at a time. Never use `all tables in schema`.
+- **Anonymous (`anon`) access:** the only migration that creates `anon` policies or grants is the single temporary one (policies named `TEMP anon …`). Other migrations may mention `anon` only to revoke privileges or to document it. Use only non-sensitive sample data while it is enabled.
+- Do not edit `public.rls_auto_enable()` or its `ensure_rls` event trigger; hardening was deferred (see `REFLECTION.md`). New tables still enable RLS explicitly.
 - Keep `user_id uuid null default auth.uid()` on `notes`, `collections` and `tags`. `updated_at` on `notes` is maintained by a PostgreSQL trigger, not by application code.
 - Only the publishable key is used in the browser. **Never** add a service-role or secret key to the project, to `.env.local` or to any `NEXT_PUBLIC_` variable.
 - **Never commit `.env.local`.** `supabase/.temp/` is also ignored.
