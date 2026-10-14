@@ -43,3 +43,27 @@ export function identityAfterCheck(
   if (definite) return null;
   return previous === undefined ? null : previous;
 }
+
+export type AuthEventAction = "ignore" | "clear" | "verify";
+
+/**
+ * What the header does with an onAuthStateChange event. auth-js re-emits
+ * SIGNED_IN every time a tab becomes visible again (and in other tabs), so a
+ * SIGNED_IN/INITIAL_SESSION for the user already verified is ignored; a new
+ * user id, USER_UPDATED and the like re-check with getUser().
+ */
+export function authEventAction(
+  event: string,
+  session: { user?: { id?: string } | null } | null,
+  verifiedUserId: string | null | undefined,
+): AuthEventAction {
+  if (event === "TOKEN_REFRESHED") return "ignore";
+  if (!session) return "clear";
+  if (
+    (event === "SIGNED_IN" || event === "INITIAL_SESSION") &&
+    session.user?.id &&
+    session.user.id === verifiedUserId
+  )
+    return "ignore";
+  return "verify";
+}

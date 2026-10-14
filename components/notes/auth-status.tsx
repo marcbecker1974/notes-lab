@@ -6,12 +6,24 @@ import { useEffect, useState } from "react";
 import { LogoutButton } from "@/components/logout-button";
 import { Button } from "@/components/ui/button";
 import {
+  authEventAction,
   createLatestGate,
   identityAfterCheck,
   type Identity,
 } from "@/lib/auth/latest";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
+
+// The two instances check at the same moment on load; they share one request.
+let inFlightCheck: ReturnType<
+  ReturnType<typeof createClient>["auth"]["getUser"]
+> | null = null;
+function sharedGetUser(supabase: ReturnType<typeof createClient>) {
+  inFlightCheck ??= supabase.auth.getUser().finally(() => {
+    inFlightCheck = null;
+  });
+  return inFlightCheck;
+}
 
 // Sign-in status for the notes header (rendered twice: in the top bar from 768px
 // up, and next to the app title below 768px; the caller hides the other one).
@@ -26,21 +38,28 @@ export function AuthStatus({ className }: { className?: string }) {
     const supabase = createClient();
     const gate = createLatestGate();
     let active = true;
+    let verifiedUserId: string | undefined; // user the shown email belongs to
 
     const verify = async () => {
       const isLatest = gate.begin();
-      const { data, error } = await supabase.auth.getUser();
-      if (active && isLatest())
+      const { data, error } = await sharedGetUser(supabase);
+      if (active && isLatest()) {
+        verifiedUserId = data.user?.id;
         setEmail((prev) =>
           identityAfterCheck(prev, { user: data.user, error }),
         );
+      }
     };
 
     // INITIAL_SESSION fires on subscribe, so no separate first check is needed.
+    // auth-js also emits SIGNED_IN whenever the tab regains focus; for the user
+    // already verified that is ignored, so focusing does not cause requests.
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "TOKEN_REFRESHED") return; // same user, nothing to re-check
-      if (!session) {
+      const action = authEventAction(event, session, verifiedUserId);
+      if (action === "ignore") return;
+      if (action === "clear") {
         gate.invalidate(); // outdated checks must not bring the email back
+        verifiedUserId = undefined;
         setEmail(null);
         return;
       }

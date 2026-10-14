@@ -8,9 +8,17 @@ import {
 } from "../lib/auth/oauth-callback.ts";
 import { authErrorMessage } from "../lib/auth/messages.ts";
 import { canonicalLocalUrl } from "../lib/auth/dev-origin.ts";
-import { createLatestGate, identityAfterCheck } from "../lib/auth/latest.ts";
+import {
+  authEventAction,
+  createLatestGate,
+  identityAfterCheck,
+} from "../lib/auth/latest.ts";
 import { readFileSync } from "node:fs";
-import { safeRedirectPath } from "../lib/auth/redirect.ts";
+import {
+  PASSWORD_UPDATE_PATH,
+  confirmRedirectPath,
+  safeRedirectPath,
+} from "../lib/auth/redirect.ts";
 
 const ORIGIN = "http://127.0.0.1:3000";
 let failed = 0;
@@ -333,6 +341,61 @@ await test("identity: a transient error keeps the previous state, else fails clo
   assert.equal(identityAfterCheck("a@b.c", net), "a@b.c");
   assert.equal(identityAfterCheck(null, net), null);
   assert.equal(identityAfterCheck(undefined, net), null);
+});
+
+await test("auth events: focus re-emits SIGNED_IN for the verified user -> ignored", () => {
+  const s = { user: { id: "u1" } };
+  assert.equal(authEventAction("SIGNED_IN", s, "u1"), "ignore");
+  assert.equal(authEventAction("INITIAL_SESSION", s, "u1"), "ignore");
+  assert.equal(authEventAction("TOKEN_REFRESHED", s, "u1"), "ignore");
+});
+await test("auth events: first sign-in, another user, USER_UPDATED -> verify", () => {
+  const s = { user: { id: "u1" } };
+  assert.equal(authEventAction("INITIAL_SESSION", s, undefined), "verify");
+  assert.equal(authEventAction("SIGNED_IN", s, undefined), "verify");
+  assert.equal(
+    authEventAction("SIGNED_IN", { user: { id: "u2" } }, "u1"),
+    "verify",
+  );
+  assert.equal(authEventAction("USER_UPDATED", s, "u1"), "verify");
+  assert.equal(authEventAction("SIGNED_IN", { user: {} }, "u1"), "verify");
+});
+await test("auth events: no session (sign-out here or in another tab) -> clear", () => {
+  assert.equal(authEventAction("SIGNED_OUT", null, "u1"), "clear");
+  assert.equal(authEventAction("INITIAL_SESSION", null, undefined), "clear");
+});
+
+// --- password recovery through /auth/confirm --------------------------------
+await test("recovery link goes to the password form, with or without next", () => {
+  for (const next of [null, "/notes", "//evil.example", "https://evil.example"])
+    assert.equal(
+      confirmRedirectPath("recovery", next, POST_LOGIN_PATH),
+      PASSWORD_UPDATE_PATH,
+    );
+  assert.equal(PASSWORD_UPDATE_PATH, "/auth/update-password");
+});
+await test("email confirmation keeps its behaviour: safe next, else /notes", () => {
+  for (const type of ["signup", "email", "invite", "magiclink", null]) {
+    assert.equal(
+      confirmRedirectPath(type, "/notes?x=1", POST_LOGIN_PATH),
+      "/notes?x=1",
+    );
+    assert.equal(confirmRedirectPath(type, null, POST_LOGIN_PATH), "/notes");
+    assert.equal(
+      confirmRedirectPath(type, "//evil.example", POST_LOGIN_PATH),
+      "/notes",
+    );
+    assert.equal(
+      confirmRedirectPath(type, "https://evil.example", POST_LOGIN_PATH),
+      "/notes",
+    );
+  }
+});
+await test("/auth/confirm routes its destination through confirmRedirectPath", () => {
+  const code = src("app/auth/confirm/route.ts");
+  assert.ok(
+    code.includes("confirmRedirectPath") && !code.includes("/protected"),
+  );
 });
 
 if (failed) {

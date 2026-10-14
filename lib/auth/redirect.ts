@@ -30,3 +30,22 @@ export function safeRedirectPath(
   const path = `${url.pathname}${url.search}${url.hash}`;
   return path.startsWith("//") ? fallback : path;
 }
+
+// Where a password-recovery link must end: the form that sets a new password.
+export const PASSWORD_UPDATE_PATH = "/auth/update-password";
+
+/**
+ * Destination after /auth/confirm verified a token-hash email link. A recovery
+ * link always goes to the password form (a recovery session shown on /notes
+ * would never ask for the new password); every other type follows the
+ * validated `next` and otherwise falls back to `fallback`.
+ */
+export function confirmRedirectPath(
+  type: string | null | undefined,
+  next: string | null | undefined,
+  fallback: string,
+): string {
+  return type === "recovery"
+    ? PASSWORD_UPDATE_PATH
+    : safeRedirectPath(next, fallback);
+}

@@ -11,7 +11,7 @@ Read before working: `docs/PROJECT_BRIEF.md` (scope and acceptance criteria), `d
 - Stack: Next.js App Router, TypeScript, Tailwind CSS, shadcn/ui, Supabase PostgreSQL, supabase-js. Run locally with `npm run dev` (http://127.0.0.1:3000; use this origin, not `localhost`).
 - Next.js in this repo has breaking changes (see `AGENTS.md`): read the relevant guide in `node_modules/next/dist/docs/` before writing Next.js code.
 - Out of scope: deployment, rich-text editing, AI features, file uploads, public sharing, per-user data isolation (row-level ownership policies) and any authentication beyond the extension below. Do not implement them.
-- **Authorised authentication extension (Feature 5, `feature/google-signin`):** "Continue with Google" via Supabase Auth, next to the starter's email/password pages. Sign-in is completed on the server in `app/auth/callback/route.ts`; redirect validation, callback outcomes and messages live in `lib/auth/`; the button is `components/google-sign-in-button.tsx`; `/notes` is the destination for both methods (Feature 6, `feature/post-login-navigation`: navigation and a display-only status only, via `POST_LOGIN_PATH` in `lib/auth/oauth-callback.ts`; `/protected` stays as the auth test page). The client ID and secret are stored only in the Supabase dashboard, never in the repo or any env file. Local origin is always `http://127.0.0.1:3000` (never `localhost`). **Signing in does not make notes private:** `/notes` stays open to `anon` and the TEMP policies still give every `authenticated` user full access, so no confidential data. `lib/notes-db.ts` and the notes data flow stay auth-free; the only auth-aware piece of the notes UI is the display-only sign-in status in the header (`components/notes/auth-status.tsx`, Feature 6: email + Logout, or a Login link). Any `next`-style redirect parameter must go through `safeRedirectPath` in `lib/auth/redirect.ts`. Tests: `npm run test:auth`.
+- **Authorised authentication extension (Feature 5, `feature/google-signin`):** "Continue with Google" via Supabase Auth, next to the starter's email/password pages. Sign-in is completed on the server in `app/auth/callback/route.ts`; redirect validation, callback outcomes and messages live in `lib/auth/`; the button is `components/google-sign-in-button.tsx`; `/notes` is the destination for both methods (Feature 6, `feature/post-login-navigation`: navigation and a display-only status only, with password-recovery links ending on `/auth/update-password`, via `POST_LOGIN_PATH` in `lib/auth/oauth-callback.ts`; `/protected` stays as the auth test page). The client ID and secret are stored only in the Supabase dashboard, never in the repo or any env file. Local origin is always `http://127.0.0.1:3000` (never `localhost`). **Signing in does not make notes private:** `/notes` stays open to `anon` and the TEMP policies still give every `authenticated` user full access, so no confidential data. `lib/notes-db.ts` and the notes data flow stay auth-free; the only auth-aware piece of the notes UI is the display-only sign-in status in the header (`components/notes/auth-status.tsx`, Feature 6: email + Logout, or a Login link). Any `next`-style redirect parameter must go through `safeRedirectPath` in `lib/auth/redirect.ts`. Tests: `npm run test:auth`.
 - Reuse the existing project and Supabase setup. Do not add dependencies or services without asking.
 - UI: shadcn/ui components in `components/ui` (new-york style, Tailwind 3, imports `cn` from `@/lib/utils`), notes UI in `components/notes/`. Do not run `npx shadcn add` unattended: the 4.x CLI added unapproved packages (`cn`, the umbrella `radix-ui`) and imported `cn` from the wrong place. Write or review components by hand and add only the individual `@radix-ui/react-*` packages that are approved (currently `alert-dialog`, `checkbox`, `collapsible`, `dropdown-menu`, `label`, `scroll-area`, `select`, `separator`, `slot`).
 - Layout: three columns from 1200px; collapsible collections sidebar at 768 to 1199px; stacked below 768px (accepted for the MVP). **Known limitation:** below 768px the editor is not reachable (its grid row is about 2px high); fixing it is a separate follow-up task, not part of Feature 4. Every note update, including collection moves, bumps `updated_at`.
@@ -48,3 +48,30 @@ Read before working: `docs/PROJECT_BRIEF.md` (scope and acceptance criteria), `d
 - Do not commit, push or create a repository or remote unless asked.
 - Before merging a PR, run a review slash command on its diff and record a real finding in `REFLECTION.md`. Also review one PR diff in a fresh Claude Code session and record a finding. Never invent findings.
 - Keep this file up to date when the Supabase conventions or database access rules change.
+
+## Authentication and Route Protection
+
+- Use Supabase Auth for authentication and session management.
+- Every authenticated-only route must verify the user's
+  identity on the server before rendering protected content.
+  This is mandatory only for routes designated as authenticated-only;
+  designating a route is a scope decision recorded in `docs/PROJECT_BRIEF.md`.
+- Never rely solely on client-side session state.
+- Redirect unauthenticated users to /auth/login.
+- Use the official Supabase skill for authentication,
+  session management and database security tasks.
+- Enforce data access permissions through appropriate
+  Supabase Row Level Security (RLS) policies. Secure, user-specific
+  RLS policies are mandatory for any future protected data access.
+- Public routes must be explicitly identified and documented.
+  Currently public: `/notes` (open to anonymous visitors, display-only
+  sign-in status), `/auth/*` (sign-in, sign-up, callback, confirmation
+  and password pages) and `/` (starter landing page); `/protected` is the
+  only route that verifies the user on the server (`lib/supabase/proxy.ts`).
+- **Documented demo exception:** the temporary anonymous (`TEMP anon …`)
+  Notes policies and grants, and the public `/notes` route with them, are
+  an accepted exception for the course demo (see "Supabase conventions").
+  Their replacement is the planned Feature 7: User Data Isolation &
+  Secure RLS, which also removes the `/notes` exemption in
+  `lib/supabase/proxy.ts`. Until then, do not implement it ad hoc (see
+  "Project rules": out of scope) and keep using only non-sensitive data.
