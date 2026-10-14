@@ -1,3 +1,4 @@
+import { POST_LOGIN_PATH } from "@/lib/auth/oauth-callback";
 import { safeRedirectPath } from "@/lib/auth/redirect";
 import { createClient } from "@/lib/supabase/server";
 import { type EmailOtpType } from "@supabase/supabase-js";
@@ -8,8 +9,8 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const token_hash = searchParams.get("token_hash");
   const type = searchParams.get("type") as EmailOtpType | null;
-  // Only same-origin paths are followed; anything else falls back to "/".
-  const next = safeRedirectPath(searchParams.get("next"), "/");
+  // Only same-origin paths are followed; anything else falls back to /notes.
+  const next = safeRedirectPath(searchParams.get("next"), POST_LOGIN_PATH);
 
   if (token_hash && type) {
     const supabase = await createClient();
@@ -19,7 +20,7 @@ export async function GET(request: NextRequest) {
       token_hash,
     });
     if (!error) {
-      // redirect user to the validated destination or root of app
+      // redirect user to the validated destination or /notes
       redirect(next);
     } else {
       // redirect the user to an error page with some instructions
