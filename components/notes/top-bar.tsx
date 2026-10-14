@@ -2,6 +2,7 @@
 
 import { PanelLeft, Plus, Search } from "lucide-react";
 
+import { AuthStatus } from "./auth-status";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -16,7 +17,8 @@ type TopBarProps = {
 
 // Shared header over the notes list and the editor: the search field, plus (at
 // medium widths only, where the sidebar is collapsed) the sidebar toggle and a
-// New note button.
+// New note button. The sign-in status (email and Logout, or Login) sits at the end from 768px up;
+// below that it is shown next to the app title in the sidebar header.
 export function TopBar(props: TopBarProps) {
   return (
     <div className="flex items-center gap-3 md:col-span-2">
@@ -47,6 +49,7 @@ export function TopBar(props: TopBarProps) {
       <Button className="hidden md:max-[1199px]:inline-flex" onClick={props.onNewNote} disabled={props.creating}>
         <Plus /> New note
       </Button>
+      <AuthStatus className="max-md:hidden" />
     </div>
   );
 }

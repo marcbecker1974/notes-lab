@@ -425,3 +425,161 @@ Focused refinement against `docs/design/notes-lab-original-mockup.png`; no schem
 **Follow-up task (separate, unresolved, not part of this feature):** "Implement user-level data isolation and secure Supabase RLS policies." Google sign-in does not provide it. The temporary `anon` and `authenticated` policies still allow all four tables to be read and changed by anyone with the publishable key, so the Notes App must not be treated as production-ready or used for confidential data. Tracked in `docs/PROJECT_BRIEF.md` section 9 (follow-up) with the steps in `docs/ARCHITECTURE.md` section 6.
 
 **Lessons.** Test redirect validators against the normalised output, not just the input string. A smoke test on the real server caught an origin problem that unit tests could not. The first test for an edge case needs an assertion that would fail on the bug. A manual test can be impossible to run as intended (cancellation was skipped by Google's automatic sign-in); say so rather than count it as passed. Provider settings were confirmed to work only indirectly.
+
+## Feature 6: post-login navigation (`feature/post-login-navigation`) — status: PR #6 open; independent review fixes (M1, L1) applied locally, awaiting owner approval to commit; email-dependent regression tests blocked by the Supabase email rate limit
+
+**What and why.** After a successful sign-in the user should land in the Notes app (`/notes`), not on the starter's `/protected` page. Navigation only: no change to notes, database permissions, RLS, providers or anonymous access; `/protected` stays as the auth test page.
+
+**Where `/protected` was the success destination:** `OAUTH_SUCCESS_PATH` in `lib/auth/oauth-callback.ts` (Google), `components/login-form.tsx`, `components/update-password-form.tsx`, and `emailRedirectTo` in `components/sign-up-form.tsx`. `/auth/confirm` had a fallback of `/`.
+
+**Decisions.**
+- *One constant.* `OAUTH_SUCCESS_PATH` became `POST_LOGIN_PATH = "/notes"` in `lib/auth/oauth-callback.ts`; the login form, the update-password form and `/auth/confirm` import it. Alternative rejected: a new `lib/auth/destinations.ts`. The plain Node test script cannot resolve an extensionless relative import and `tsc` rejects a `.ts` one, so the constant lives in the file that already has no imports (found by running the tests, not by design).
+- *Email confirmation.* The Supabase email template is a dashboard setting and not in the repo; no access token was available, so which flow it uses could **not be verified from here**. Changing `emailRedirectTo` to `/notes` alone would not create a session with the default PKCE link (`?code=`, nothing on `/notes` exchanges it). So `emailRedirectTo` now points at `/auth/callback`, which exchanges the code on the server and then goes to `/notes`; failures go to `/auth/login?error=…`. For a token-hash template, `/auth/confirm` now falls back to `/notes` (an absolute or foreign `next` such as `<origin>/auth/callback` is rejected by `safeRedirectPath` and falls back too). Both paths therefore end on `/notes` with a session. The manual test below decides which one is live.
+- *Password recovery.* After a successful password update the form goes to `/notes`. The forgot-password link, error and expired-link handling are unchanged. `/auth/confirm` with `type=recovery` and no `next` now falls back to `/notes` instead of `/` (neither shows the update-password page; the app's own forgot-password flow does not use this path, so it is a limitation for token-hash templates only; see the review section).
+- *Not changed:* `safeRedirectPath`, the callback ignoring `next`, logout (`/auth/login`), `proxy.ts`, `/protected`, the notes UI, `lib/notes-db.ts`, migrations.
+
+**Risks and limitations.** `/notes` is open to anonymous users, so arriving there proves nothing about the session; user-level data isolation is still the separate future feature. Confirmation emails already sent still point at `/protected`, which still works.
+
+**Automated results.** `npm run test:auth` passes (success cases now expect `/notes`; added: the constant is `/notes`, an absolute or foreign `next` falls back to `/notes`; cancelled, failed, missing, replayed and garbage code cases are still failures), `tsc --noEmit`, `eslint .`, `prettier --check` on the changed files and `next build` all pass. Prettier on the whole repo still reports 19 pre-existing files, not touched here.
+
+**Manual acceptance tests:** PASSED, see "Feature 6 manual acceptance results" below.
+
+### Feature 6 extension: sign-in status and Logout in the notes header — status: manual tests PASSED (owner)
+
+**Why.** The first manual test of Feature 6 (Google sign-in lands on `/notes`: PASS) showed a usability gap: once users land in the Notes app there is no visible way to sign out (the starter's `AuthButton` only lives on the unused home page). The owner approved a small scope extension.
+
+**Decisions.**
+- *Placement.* One new component, `components/notes/auth-status.tsx`, at the end of the existing `TopBar` row. No new navigation bar, no layout change. Alternative rejected: reusing the starter's server `AuthButton`; `TopBar` is a client component in a client tree, and a server component cannot be imported into it.
+- *Identity.* The browser client's `supabase.auth.getUser()`, which asks the Auth server to validate the session (`getSession()` or the cookie alone would show unverified data). `onAuthStateChange` updates the header after login or logout in another tab; the handler re-runs `getUser()` rather than trusting the pushed session. Only the email is read; no token is rendered or stored. Alternative rejected: server-side `getClaims()` passed down as props, which needs a server wrapper around the page and would make `/notes` dynamic for a display-only feature.
+- *Logout.* Reused `LogoutButton` (`signOut()`, then `/auth/login`), adding a `compact` style, a "Logging out…" state, and an inline alert if `signOut` fails (previously an error was ignored). The loading and error states apply to every use of the button, including the starter pages; only the style is opt-in.
+- *Anonymous.* A "Login" link to `/auth/login`. While the check runs a fixed-size placeholder avoids layout jump. `/notes` still needs no authentication.
+- *Mobile.* First version: the address hidden below `sm` (640px), control in the top bar. Superseded by the responsive fix below.
+- *Docs.* `CLAUDE.md` said the notes UI stays auth-free; it now names this display-only component as the one exception. `ARCHITECTURE.md` and `PROJECT_BRIEF.md` updated.
+
+**Automated results.** `tsc --noEmit`, `eslint .`, `npm run test:auth` and `next build` pass. There is no component test setup in the project, and none was added (no new dependencies).
+
+**Limitations and risks.** The header briefly shows a blank placeholder before the check completes. Showing an email does not make notes private: policies still let `anon` read and write (separate future feature). Logout ends the Supabase session cookie; an already-open `/notes` tab stays usable anonymously, by design. `Layout below 768px` limitation from earlier is unchanged.
+
+**Manual acceptance tests (checklist; results below):** A Google login → `/notes` → email → Logout; B email/password likewise; C anonymous `/notes` shows Login; D Login → `/auth/login`; E after Logout `/protected` redirects to login; F notes CRUD, search, collections unchanged; G controls usable at phone width.
+
+### Feature 6 extension: responsive header fix at 375px — status: manual mobile test PASSED (owner)
+
+**Finding (manual mobile test, 375px).** On `/notes` the Logout button sat next to the search field with the email hidden, which squeezed the search field and left the control detached from the app title. The login page was fine.
+
+**Decision.** Below 768px the status control moves to the "Notes Lab" title row (right-aligned, in the sidebar header, which is the top of the stacked mobile layout); the top bar there contains only the search field, now a full-width row. From 768px up nothing changes (email and Logout at the end of the top bar). The email is hidden below 768px (was 640px) and kept for screen readers. Implementation: `AuthStatus` takes a `className`; `TopBar` renders it with `max-md:hidden`, `SidebarPanel` renders it with `ml-auto md:hidden`; wrapping lets a failed-logout message wrap instead of overflowing.
+
+**Alternatives rejected.** Moving the title into `TopBar` (the title belongs to the sidebar component and the grid would need restructuring, more than a small fix); a single instance repositioned with CSS only (not possible, the two places are in different parts of the DOM).
+
+**Trade-off.** Two `AuthStatus` instances are mounted, one hidden by CSS. Superseded by the PR #6 independent review fix below: no request when signed out, one shared `getUser()` on load when signed in, none on tab focus.
+
+**Automated results.** `tsc --noEmit`, `eslint .`, `npm run test:auth` and `next build` pass. No browser automation is available in this environment, so the layout was **not** checked visually by me.
+
+**Manual mobile test (checklist; PASSED, see results below).** At 375px: title row shows "Notes Lab" with Login or Logout at the right, no email; search is a full-width row below; Logout works; at 768px and wider the email and Logout are at the end of the top bar as before.
+
+### Feature 6 manual acceptance results (owner, 2026-10-14)
+
+**PASS (confirmed by the owner):**
+- Google sign-in lands on `/notes`.
+- Email/password sign-in lands on `/notes`.
+- New email registration and confirmation land on `/notes` with a valid authenticated session.
+- The correct user email and a Logout button are shown in the notes header.
+- Logout works for both sign-in methods.
+- Anonymous visitors see the Login link.
+- The authentication controls work at 375px.
+- Password recovery and password update work.
+- Notes CRUD still works across sessions.
+
+**Confirmed limitation (known, not a Feature 6 defect):** all signed-in users, and anonymous visitors, share the same notes data. This is the existing open `anon`/`authenticated` policy situation; user-level data isolation is the separate future feature.
+
+**Explicitly NOT verified:**
+- *Which email flow was live.* The owner confirmed that registration and confirmation end on `/notes` with a session, but was not asked for, and did not report, whether the link was the default `/auth/v1/verify` PKCE link (handled by `/auth/callback`) or a token-hash link (handled by `/auth/confirm`). Both code paths are in place; which one ran is unrecorded.
+- Expired or already-used confirmation links, a wrong password, and the Google cancellation flow were not reported as tested manually (the last was already unverifiable in Feature 5); the first three are covered only in part by the automated callback tests.
+- A second open `/notes` tab after logout in another tab (expected to turn into the Login link via `onAuthStateChange`) and the two-instance header check at exactly 768px.
+- Logout failure state ("Logout failed. Try again."): not provoked; in the notes header it cannot appear (see the accepted limitation).
+- Desktop and tablet (768 to 1199px) header layout after the responsive fix beyond what the owner's mobile test covered.
+
+### Feature 6 review findings and fixes (2026-10-14)
+
+Reviews: a code review and a security review, each by a read-only subagent on the uncommitted diff. The owner reviewed the findings and approved fixes 1, 3, 4, 5 and 6; finding 2 was accepted as a documented limitation.
+
+**Security review.** No vulnerability found; authorization unchanged (`proxy.ts`, `notes-db.ts`, migrations not in the diff), no secrets added, redirect validation unchanged and still tested. It raised the same issue as code finding 1 and a stale-email race (code finding 3).
+
+**Code review findings and decisions.**
+1. *Email confirmation errors showed Google messages (medium), fixed.* Since sign-up returns through `/auth/callback`, an expired or used link read "Google sign-in was cancelled". Fix: `error_code=otp_expired` maps to a new code `link_expired` with a neutral expired-or-used message; the generic failure text no longer mentions Google. **Alternative not taken:** a `?flow=email` marker on `emailRedirectTo`; Supabase may match the redirect allow-list without regard to a query string, which cannot be checked from the repo, and a mismatch would silently send confirmations to the Site URL. The marker was approved as an option, not required. Tests: expired link, otp_expired wins over a code, Google cancel unchanged, a spoofed `error_code` only changes the text and never a success.
+2. *"Logout failed" never shown in the notes header (medium), accepted limitation.* auth-js clears the local session and emits `SIGNED_OUT` before returning a network or server error; the header shows "Login" and the button unmounts. The user never appears signed in after logout, but the server-side token may not be revoked. A local-scope sign-out or error lifting was not done (no auth refactor for this).
+3. *`AuthStatus` races and duplicate checks (low/medium), fixed.* Reported: `INITIAL_SESSION` caused a second `getUser()`, an older response could overwrite a newer `SIGNED_OUT`, and a transient error showed "Login". Fix: no separate first check, `TOKEN_REFRESHED` ignored, `createLatestGate` (newest check wins, sign-out invalidates) and `identityAfterCheck` (transient error keeps the previous state), both pure in `lib/auth/latest.ts` so the plain Node test script covers them. The reviewer's claim that `INITIAL_SESSION` fires on subscribe was relied on, not re-verified in a browser; the manual test below covers it.
+4. *Documentation inaccuracies (low), fixed:* check count, scope of the error states, the recovery-link limitation, the ARCHITECTURE wording.
+5. *Test gaps (low), fixed within the existing lightweight setup:* email error mapping, source checks that login, update-password and `/auth/confirm` use `POST_LOGIN_PATH` and contain no `/protected`, sign-up returns through `/auth/callback`, the race helpers. Not covered: the React component itself (no component test framework; none added).
+6. *Accessibility (low), fixed:* one `sr-only` "Signed in as <email>" at all widths; the visible address is `aria-hidden`.
+
+**Not verified at review time** (resolved or narrowed by the final manual tests below): that Supabase delivers `error_code=otp_expired` in the query string of the callback, and the `INITIAL_SESSION` behaviour in a browser.
+
+**Automated results after the fixes.** See the final run recorded below.
+**Final automated run after the fixes (2026-10-14):** `npm run test:auth` 52 checks, all passed; `tsc --noEmit`, `eslint .` and `next build` passed; `prettier --check` passed on the changed code files. `top-bar.tsx` and `sidebar.tsx` are not Prettier-formatted in the repo (pre-existing) and were left as they were. Manual tests to repeat are listed in the report to the owner; their results are not recorded here yet.
+
+### Feature 6 final manual regression tests (owner, 2026-10-14)
+
+**Manual tests (performed by the owner in a browser, all PASS):**
+- **A. Tab synchronisation:** after signing out in one tab, the other open `/notes` tab updates its status to the Login link. This exercises the `onAuthStateChange` / sign-out path and shows the header does not keep the email after sign-out.
+- **B. Used confirmation link:** re-using an already-used email confirmation link lands on the login page with the "expired or already used" message (`link_expired`). This shows that for a used link Supabase does send `error_code=otp_expired` in the callback's query string.
+- **C. Mobile:** the Login/Logout controls work at 375px after the review fixes.
+- Everything from the earlier manual acceptance round still passes: Google sign-in, email/password sign-in, registration plus email confirmation (with a valid session) all end on `/notes`; correct email and Logout shown; logout for both methods; anonymous Login link; password recovery and update; Notes CRUD across sessions.
+
+**Automated tests (not manual):** `npm run test:auth` (52 checks: redirect validation, callback outcomes, email-error mapping, `POST_LOGIN_PATH` wiring by source check, the race helpers `createLatestGate` and `identityAfterCheck`), `tsc --noEmit`, `eslint .`, `next build`, `prettier --check` on changed code files. They cover logic only; the React `AuthStatus` component and the real Supabase flows are covered only by the manual tests above.
+
+**Still unverified (unchanged):**
+- A genuinely *expired* (not just used) confirmation link was not tried; it is expected to behave like a used one (same `otp_expired` code) but that is an assumption.
+- A confirmation link opened in a different browser (expected: neutral "Sign-in could not be completed…" text, email confirmed, password login works).
+- Which email template flow was live (default `/auth/v1/verify` link through `/auth/callback`, or a token-hash link through `/auth/confirm`) was never recorded.
+- The Google cancellation flow (not reproducible, since Feature 5).
+- The header exactly at 768px and the 768 to 1199px range, and a provoked logout failure (cannot be shown in the notes header, see the accepted limitation).
+- That `INITIAL_SESSION` fires on subscribe was not tested in isolation; the header showing the right status after page loads and reloads in the manual tests indicates it works.
+
+**Accepted limitations and open risks (unchanged):**
+- All users and anonymous visitors share the same notes (open `anon`/`authenticated` policies). Signing in does not make notes private. User-level data isolation and securing the RLS policies remain a separate future feature.
+- Logout error display in the notes header (documented above); the server-side token may not be revoked after a network failure while logout still clears the local session.
+- Token-hash recovery links through `/auth/confirm` without `next` land on `/notes`, not on the password form (the app's own forgot-password flow is unaffected).
+- Below 768px the note editor is still not reachable (earlier known limitation, not part of this feature).
+- Pre-existing, unchanged: open sign-up, unvalidated `type` cast in `/auth/confirm`, 19 files not Prettier-formatted.
+
+### PR #6 independent review in a fresh session (2026-10-14)
+
+Reviewed by a fresh Claude Code session (no shared context) against the PR diff on `main`; read-only. Checks run in that session: `npm run test:auth`, `tsc --noEmit`, `eslint .`, `next build` (all passed). Prettier warnings on `sidebar.tsx`, `top-bar.tsx`, `ARCHITECTURE.md` and `PROJECT_BRIEF.md` already exist on `main`. No security issue found; redirect validation, `proxy.ts` and the data layer unchanged.
+
+| Finding | Verdict | Decision |
+|---|---|---|
+| **M1 (medium).** `AuthStatus` calls `getUser()` on every tab focus, twice (one per mounted instance). auth-js emits `SIGNED_IN` when a tab becomes visible (`_onVisibilityChanged` → `_recoverAndRefresh`, `GoTrueClient.js`, auth-js 2.117.3) and across tabs; the handler only skipped `TOKEN_REFRESHED`. The docs said "one `getUser()` per instance on load". Verified by reading the source, **not** observed in a browser. | Valid | **Fixed.** `authEventAction` (pure, `lib/auth/latest.ts`) ignores `SIGNED_IN`/`INITIAL_SESSION` for the already verified user id, clears on no session, re-checks on a new user or `USER_UPDATED`; the two instances share one in-flight `getUser()`. The simpler alternative of rendering a single instance was not taken: it needs a layout change across sidebar and top bar. |
+| **L1 (low).** A `type=recovery` link through `/auth/confirm` without `next` ended on `/notes` with a recovery session and no password form. | Valid | **Fixed.** `confirmRedirectPath` sends recovery to `/auth/update-password` regardless of `next`; other types unchanged. No Supabase template change needed. |
+| **L2 (low).** `/auth/confirm` failures go to `/auth/error` with the Supabase message, unlike the neutral `link_expired` text of `/auth/callback`. | Valid, partly pre-existing | **Accepted limitation.** |
+| **L3 (low).** `LogoutButton` loading/failed states have no automated test. | Valid | **Accepted limitation** (no component test framework; not added). |
+
+**Tests added:** 6 (event decisions for focus re-emit, first sign-in, other user, `USER_UPDATED`, sign-out; recovery destination with unsafe and missing `next`; email confirmation types keep `next`/`/notes` and reject foreign redirects; the route uses `confirmRedirectPath`). `npm run test:auth` now runs 58 checks. Not covered: the React component and the real Supabase events.
+
+**Manual regression tests after these fixes (owner, 2026-10-14).** Only what was actually performed is listed as passed.
+
+- **PASS (after the fixes):** cross-tab state synchronisation. Signing out in one tab updated the status in the other open tab to the Login link without a refresh.
+- **BLOCKED:** password recovery (forgot-password, email link, password form, new password, `/notes`). Supabase returned "email rate limit exceeded", so no recovery email was sent. The L1 change (`/auth/confirm` sends `type=recovery` to `/auth/update-password`) is therefore covered by automated tests only.
+- **NOT RETESTED:** registration with email confirmation after the fixes (it also needs email delivery).
+- **NOT PERFORMED:** the DevTools Network check that tab focus no longer fires `/auth/v1/user`, and signing in as a different user in a second tab. The M1 fix is therefore verified by the pure-function tests and by reading the auth-js source, **not** observed in a browser.
+- **PREVIOUSLY PASSED (before the review fixes, not repeated since):** Google sign-in to `/notes`; email/password sign-in to `/notes`; email confirmation with a valid session ending on `/notes`; password recovery and update; Login/Logout on desktop and mobile (375px); Notes CRUD across sessions. The M1 change touches only the header status component and the L1 change only the `/auth/confirm` destination, but these flows were not re-run afterwards.
+
+**Automated results after the fixes.** `npm run test:auth` 58 checks passed; `tsc --noEmit`, `eslint .` and `next build` passed; `prettier --check` passed on the changed code files (the four files that warn also warn on `main`).
+
+**Remaining limitations and risks.**
+- Unverified in a browser: M1 request volume on focus; L1 recovery destination; registration and confirmation after the fixes.
+- The token-hash recovery flow (an email template using `/auth/confirm?token_hash=…&type=recovery`) is untested end to end, and which template the Supabase project uses is still unrecorded. No template change is required.
+- L2 (raw Supabase text on `/auth/error` for failed token-hash links) and L3 (no test for the `LogoutButton` states) are accepted. "Logout failed" is still not shown in the notes header.
+- Pre-existing, unchanged: notes are shared between all users and `/notes` is open to anonymous visitors; the note editor is unreachable below 768px.
+
+**Follow-up items (preserved).**
+1. User-level data isolation and secure Supabase RLS policies (see `docs/PROJECT_BRIEF.md`).
+2. Full mobile note editing below 768px.
+3. Verify the alternative token-hash recovery flow.
+4. Retest the email-dependent flows (password recovery, registration plus confirmation) once Supabase email delivery works again; the free-tier email rate limit blocked them. Waiting for the limit to reset or configuring custom SMTP in the dashboard are options (a dashboard change, not made here).
+
+**Lessons learned.**
+- A library event is not "once per sign-in". auth-js re-emits `SIGNED_IN` on every tab focus; the first review round and the docs assumed one check per load. Read what the library emits before designing around it, and treat "no duplicate requests" as a claim that needs a network trace.
+- Putting the decision in a pure function (`authEventAction`, `confirmRedirectPath`) was the only way to test it with the plain Node script, and relative `.ts` imports break `tsc`, so such helpers must stay import-free.
+- A fresh-session review found what two earlier subagent reviews missed, so it is worth doing before a merge.
+- Email-dependent flows depend on an external quota. Test them first, and record "blocked" instead of "passed" when they cannot run.
+- Running Prettier on a file that was never formatted rewrites it wholesale; check against `main` first and format only code files.

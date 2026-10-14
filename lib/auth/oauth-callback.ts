@@ -2,10 +2,13 @@
 // Kept free of Next.js and Supabase imports so it can be tested in isolation;
 // the route handler supplies the real code exchange.
 
-export const OAUTH_SUCCESS_PATH = "/protected";
+// Where every successful sign-in, email confirmation and password update ends.
+// Navigation only: /notes stays open to anonymous visitors (docs/ARCHITECTURE.md);
+// /protected remains as the auth test page.
+export const POST_LOGIN_PATH = "/notes";
 
 export type OAuthErrorCode =
-  "oauth_cancelled" | "oauth_failed" | "oauth_missing_code";
+  "oauth_cancelled" | "oauth_failed" | "oauth_missing_code" | "link_expired";
 
 export type ExchangeCode = (code: string) => Promise<{ error: unknown | null }>;
 
@@ -22,6 +25,10 @@ export async function resolveOAuthCallback(
   // Only a fixed code is passed on; the raw text is never shown or reflected.
   const providerError = params.get("error");
   if (providerError) {
+    // Supabase reports an expired or used email link as error_code=otp_expired.
+    // It only selects the message; it is never evidence of a sign-in.
+    if (params.get("error_code") === "otp_expired")
+      return failurePath("link_expired");
     return failurePath(
       providerError === "access_denied" ? "oauth_cancelled" : "oauth_failed",
     );
@@ -32,7 +39,7 @@ export async function resolveOAuthCallback(
 
   try {
     const { error } = await exchangeCode(code);
-    return error ? failurePath("oauth_failed") : OAUTH_SUCCESS_PATH;
+    return error ? failurePath("oauth_failed") : POST_LOGIN_PATH;
   } catch {
     return failurePath("oauth_failed");
   }

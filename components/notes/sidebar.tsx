@@ -12,6 +12,7 @@ import { countNotes, countTagUses, sameView, type View } from "@/lib/notes-view"
 import { PALETTE, type PaletteKey } from "@/lib/palette";
 import { cn } from "@/lib/utils";
 import { ColorSwatchMenu } from "./color-swatch-menu";
+import { AuthStatus } from "./auth-status";
 
 type SidebarProps = {
   notes: Note[];
@@ -81,6 +82,8 @@ export function Sidebar(props: SidebarProps) {
             <NotebookPen className="h-[18px] w-[18px]" aria-hidden="true" />
           </span>
           <span className="text-xl font-semibold tracking-tight">Notes Lab</span>
+          {/* Below 768px only; the top bar shows it from 768px up. */}
+          <AuthStatus className="ml-auto md:hidden" />
         </div>
         <Button className="h-11 w-full text-[15px]" onClick={props.onNewNote} disabled={props.creatingNote}>
           <Plus /> New note

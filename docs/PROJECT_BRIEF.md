@@ -67,7 +67,8 @@ Beyond the 12 requirements, the app also needs basic **notes CRUD** (create, rea
 Other optional ideas, only if time permits after the above:
 1. **Colour-coded tags and collections** (built in Feature 4, `feature/color-coded-tags-collections`): eight palette colours stored in the database, shown for collections (folder icon) and tags (dot and soft badge) and changeable from the UI. Scope change: collections got colours too.
 2. **Renaming collections.**
-3. **Google sign-in** (Feature 5, `feature/google-signin`; scope change approved by the owner, status: implemented in PR #5; manual acceptance tests passed except the Google cancellation flow, which could not be tested manually; independent PR review done, its fixes applied and awaiting owner approval to commit): "Continue with Google" on the sign-in and sign-up pages through Supabase Auth, completed server-side at `/auth/callback`, landing on `/protected` like email/password. It adds no schema or policy change and **does not make notes private per user**; see section 4.7 and the follow-up in section 9.
+3. **Google sign-in** (Feature 5, `feature/google-signin`; scope change approved by the owner, status: implemented in PR #5; manual acceptance tests passed except the Google cancellation flow, which could not be tested manually; independent PR review done, its fixes applied and awaiting owner approval to commit): "Continue with Google" on the sign-in and sign-up pages through Supabase Auth, completed server-side at `/auth/callback`, landing on `/protected` like email/password (Feature 6 later changed the destination to `/notes`). It adds no schema or policy change and **does not make notes private per user**; see section 4.7 and the follow-up in section 9.
+4. **Post-login navigation** (Feature 6, `feature/post-login-navigation`; scope change approved by the owner, status: implemented in PR #6, manual acceptance tests passed, independent review fixes (header request volume, password-recovery destination) applied locally and awaiting owner approval to commit; password recovery and registration with email confirmation could not be retested afterwards because of the Supabase email rate limit, see REFLECTION.md): after Google sign-in, email/password sign-in, email confirmation and password update the user lands on `/notes` instead of `/protected`; the notes header shows the signed-in email with a Logout button, or a Login link for anonymous visitors (display only); email-link errors have their own neutral messages; a recovery link opened through `/auth/confirm` leads to the password form. Navigation and display only: no change to notes, database permissions, RLS, providers or anonymous access; `/protected` stays as the auth test page. Details and limitations: ARCHITECTURE.md 4a and REFLECTION.md.
 
 ### 4.4 UI
 
@@ -95,7 +96,7 @@ Reuse the existing `notes-lab` project and its Supabase configuration. Do not st
 
 ### 4.7 Security constraints
 
-The notes data has no per-user protection, so the database is temporarily reachable by anonymous (`anon`) clients. Google and email/password sign-in exist (Feature 5) but only gate the starter's `/protected` page; they do not restrict notes. The following constraints therefore still apply. Details are in [ARCHITECTURE.md](./ARCHITECTURE.md).
+The notes data has no per-user protection, so the database is temporarily reachable by anonymous (`anon`) clients. Google and email/password sign-in exist (Feature 5) but only gate the starter's `/protected` page; they do not restrict notes. Since Feature 6 a successful sign-in, email confirmation or password update lands on `/notes` (navigation only). The notes header also shows the signed-in email with a Logout button, or a Login link for anonymous visitors (display only). The following constraints therefore still apply. Details are in [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 - **Environment:** the app runs locally on `127.0.0.1:3000` (`npm run dev` binds that address; do not use `localhost`, see ARCHITECTURE.md 4a) against a cloud-hosted Supabase project. It is not deployed, shared or published.
 - **Non-sensitive data only:** use generic sample data. Never store real personal notes, names or credentials while anonymous access is enabled.
@@ -280,6 +281,13 @@ Each branch is merged through its own PR (E7). Branch 3 satisfies E6.
 ### Follow-up (not started): "Implement user-level data isolation and secure Supabase RLS policies."
 
 Sign-in does not make notes private. Needed before any real data: backfill `user_id`, set it `not null`, drop the `TEMP anon` policies and anon grants, add owner policies, remove the `/notes` exemption in `lib/supabase/proxy.ts`, add cross-owner tests, and decide whether Google sign-up should be restricted (for example to an allow-list). Steps are in ARCHITECTURE.md section 6. Until then, use non-sensitive sample data only.
+
+### Follow-ups after Feature 6 (not started)
+
+- User-level data isolation and secure Supabase RLS (above).
+- Full mobile note editing below 768px.
+- Verify the token-hash recovery flow (`/auth/confirm`, `type=recovery`) end to end.
+- Retest password recovery and registration with email confirmation when Supabase email delivery is available again.
 
 ### Still needing approval
 
