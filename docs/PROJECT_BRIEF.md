@@ -49,7 +49,7 @@ Beyond the 12 requirements, the app also needs basic **notes CRUD** (create, rea
 | E1 | Next.js App Router, TypeScript and Tailwind CSS. |
 | E2 | Supabase with the supabase-js client. |
 | E3 | Runs locally with `npm run dev`. |
-| E4 | No authentication and no deployment. |
+| E4 | No deployment. No authentication in the MVP; the owner later approved one extension, Google sign-in next to the starter's email/password pages (Feature 5, section 4.3). Notes stay unprotected by user (section 4.7). |
 | E5 | Database tables created in Supabase with correct relationships. |
 | E6 | At least one optional task, completed in its own feature branch and pull request. |
 | E7 | At least two feature branches, with their PRs merged. |
@@ -67,6 +67,7 @@ Beyond the 12 requirements, the app also needs basic **notes CRUD** (create, rea
 Other optional ideas, only if time permits after the above:
 1. **Colour-coded tags and collections** (built in Feature 4, `feature/color-coded-tags-collections`): eight palette colours stored in the database, shown for collections (folder icon) and tags (dot and soft badge) and changeable from the UI. Scope change: collections got colours too.
 2. **Renaming collections.**
+3. **Google sign-in** (Feature 5, `feature/google-signin`; scope change approved by the owner, status: implemented in PR #5; manual acceptance tests passed except the Google cancellation flow, which could not be tested manually; independent PR review done, its fixes applied and awaiting owner approval to commit): "Continue with Google" on the sign-in and sign-up pages through Supabase Auth, completed server-side at `/auth/callback`, landing on `/protected` like email/password. It adds no schema or policy change and **does not make notes private per user**; see section 4.7 and the follow-up in section 9.
 
 ### 4.4 UI
 
@@ -94,22 +95,22 @@ Reuse the existing `notes-lab` project and its Supabase configuration. Do not st
 
 ### 4.7 Security constraints
 
-The MVP has no authentication, so the database is temporarily reachable by anonymous (`anon`) clients. The following constraints apply until authentication is added. Details are in [ARCHITECTURE.md](./ARCHITECTURE.md).
+The notes data has no per-user protection, so the database is temporarily reachable by anonymous (`anon`) clients. Google and email/password sign-in exist (Feature 5) but only gate the starter's `/protected` page; they do not restrict notes. The following constraints therefore still apply. Details are in [ARCHITECTURE.md](./ARCHITECTURE.md).
 
-- **Environment:** the app runs locally on `localhost:3000` against a cloud-hosted Supabase project. It is not deployed, shared or published.
+- **Environment:** the app runs locally on `127.0.0.1:3000` (`npm run dev` binds that address; do not use `localhost`, see ARCHITECTURE.md 4a) against a cloud-hosted Supabase project. It is not deployed, shared or published.
 - **Non-sensitive data only:** use generic sample data. Never store real personal notes, names or credentials while anonymous access is enabled.
 - **Anonymous access is temporary and isolated:** the anon read/write policies live in one dedicated migration, named and commented as temporary, and are the only place that mentions `anon`. Removing that migration closes anonymous access.
 - **Accepted risk:** anyone with the project URL and publishable key can read, modify or delete rows in the four app tables. This is acceptable only for local development with non-sensitive data.
 - **Abuse limits:** size limits on titles, bodies, and tag and collection names.
 - **Keys:** only the publishable key is used in the browser. A service-role or secret key must never be added to the project or to any `NEXT_PUBLIC_` variable. `.env.local` stays out of Git, and `supabase/.temp/` is ignored via `.gitignore`.
 - **Demo-mode notice:** the UI shows a notice that data is publicly accessible while anonymous access is on.
-- **Auth-ready design:** the schema has a nullable `user_id` (default `auth.uid()`) on `notes`, `collections` and `tags`. All database access goes through `lib/notes-db.ts`, which never reads or writes `user_id` and has no role or auth logic. The existing auth pages stay untouched and unused.
+- **Auth-ready design:** the schema has a nullable `user_id` (default `auth.uid()`) on `notes`, `collections` and `tags`. All database access goes through `lib/notes-db.ts`, which never reads or writes `user_id` and has no role or auth logic. Sign-in (email/password and Google) is separate from notes: `/notes` stays open, the TEMP policies also grant every signed-in (`authenticated`) user full access, and this is **not** suitable for confidential data or production use.
 - **Future migration:** adding authentication is a backfill plus a policy swap (see ARCHITECTURE.md, section 6), with no change to application logic.
 
 ## 5. Exclusions (Out of Scope)
 
 - Rich-text editing (plain text only)
-- Authentication
+- Authentication beyond sign-in (Google plus the starter's email/password), e.g. per-user data isolation, roles, profile pages
 - AI features
 - File uploads
 - Public sharing
@@ -186,7 +187,7 @@ Each criterion is written so it can be checked individually, by inspection of th
 
 - E1: the project uses the Next.js App Router (`app/` directory), TypeScript and Tailwind CSS.
 - E2: all data access uses `@supabase/supabase-js` (via the existing client helpers).
-- E3: `npm run dev` starts the app, which loads on `localhost:3000` without errors.
+- E3: `npm run dev` starts the app, which loads on `127.0.0.1:3000` without errors.
 - E4: no login flow is used by the notes app and nothing is deployed.
 - E5: the four tables and their foreign keys exist in the Supabase project, created through migrations in `supabase/migrations/`.
 - E6: the optional task (note count badges) lives in its own feature branch and PR.
@@ -275,6 +276,10 @@ Each branch is merged through its own PR (E7). Branch 3 satisfies E6.
 | Q6 | The first planning commit contains only `docs/PROJECT_BRIEF.md`, `docs/ARCHITECTURE.md`, `REFLECTION.md`, `.gitignore` and `CLAUDE.md`. |
 
 *Note on Q4:* the course wording "third-party slash command" is not defined in the material I have. `/code-review` ships with Claude Code and is not written by this project; the personal `pr-review` skill is the user's own and probably does not count as third-party. Confirm what the course accepts.
+
+### Follow-up (not started): "Implement user-level data isolation and secure Supabase RLS policies."
+
+Sign-in does not make notes private. Needed before any real data: backfill `user_id`, set it `not null`, drop the `TEMP anon` policies and anon grants, add owner policies, remove the `/notes` exemption in `lib/supabase/proxy.ts`, add cross-owner tests, and decide whether Google sign-up should be restricted (for example to an allow-list). Steps are in ARCHITECTURE.md section 6. Until then, use non-sensitive sample data only.
 
 ### Still needing approval
 
