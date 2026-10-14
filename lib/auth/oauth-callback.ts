@@ -5,9 +5,7 @@
 export const OAUTH_SUCCESS_PATH = "/protected";
 
 export type OAuthErrorCode =
-  | "oauth_cancelled"
-  | "oauth_failed"
-  | "oauth_missing_code";
+  "oauth_cancelled" | "oauth_failed" | "oauth_missing_code";
 
 export type ExchangeCode = (code: string) => Promise<{ error: unknown | null }>;
 
@@ -38,4 +36,18 @@ export async function resolveOAuthCallback(
   } catch {
     return failurePath("oauth_failed");
   }
+}
+
+/**
+ * Full callback decision as a redirect response. A relative Location keeps the
+ * browser on the origin it came back on, so the session cookies just set are
+ * sent. Success depends only on the code exchange: an existing session never
+ * turns a failed exchange into a success.
+ */
+export async function handleOAuthCallback(
+  url: URL,
+  exchangeCode: ExchangeCode,
+): Promise<Response> {
+  const path = await resolveOAuthCallback(url, exchangeCode);
+  return new Response(null, { status: 307, headers: { Location: path } });
 }

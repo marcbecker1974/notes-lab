@@ -67,7 +67,7 @@ Beyond the 12 requirements, the app also needs basic **notes CRUD** (create, rea
 Other optional ideas, only if time permits after the above:
 1. **Colour-coded tags and collections** (built in Feature 4, `feature/color-coded-tags-collections`): eight palette colours stored in the database, shown for collections (folder icon) and tags (dot and soft badge) and changeable from the UI. Scope change: collections got colours too.
 2. **Renaming collections.**
-3. **Google sign-in** (Feature 5, `feature/google-signin`; scope change approved by the owner, status: implemented; manual acceptance tests passed except the Google cancellation flow, which could not be tested manually; awaiting PR review): "Continue with Google" on the sign-in and sign-up pages through Supabase Auth, completed server-side at `/auth/callback`, landing on `/protected` like email/password. It adds no schema or policy change and **does not make notes private per user**; see section 4.7 and the follow-up in section 9.
+3. **Google sign-in** (Feature 5, `feature/google-signin`; scope change approved by the owner, status: implemented in PR #5; manual acceptance tests passed except the Google cancellation flow, which could not be tested manually; independent PR review done, its fixes applied and awaiting owner approval to commit): "Continue with Google" on the sign-in and sign-up pages through Supabase Auth, completed server-side at `/auth/callback`, landing on `/protected` like email/password. It adds no schema or policy change and **does not make notes private per user**; see section 4.7 and the follow-up in section 9.
 
 ### 4.4 UI
 

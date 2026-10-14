@@ -164,8 +164,10 @@ Also in Supabase: Site URL `http://127.0.0.1:3000`, and Authentication → Provi
 **Decisions.**
 - The destination is fixed (`/protected`); the callback ignores any `next` parameter.
 - Failures redirect to `/auth/login?error=<code>` with a fixed code (`oauth_cancelled`, `oauth_failed`, `oauth_missing_code`); `lib/auth/messages.ts` maps codes to text, so provider text is never displayed or reflected.
+- Success depends only on the code exchange (`handleOAuthCallback` in `lib/auth/oauth-callback.ts`); an existing session never turns a failed exchange (invalid, used or replayed code) into a success. A failure goes to `/auth/login?error=oauth_failed`.
+- The Google button refuses to start on `localhost` and tells the user to open `http://127.0.0.1:3000` (`lib/auth/dev-origin.ts`).
 - The callback answers with a **relative** `Location`: in dev, `request.nextUrl.origin` reported `localhost` for a `127.0.0.1` request, which would have switched origins and dropped the cookies.
-- `/auth/confirm` (starter, email links) now validates `next` with `safeRedirectPath` (`lib/auth/redirect.ts`): only absolute paths that resolve to the request's own origin; external, protocol-relative, backslash and control-character forms fall back to `/`. It also URL-encodes the error message.
+- `/auth/confirm` (starter, email links) now validates `next` with `safeRedirectPath` (`lib/auth/redirect.ts`): only absolute paths; the value is normalised against a fixed dummy base and the normalised path is checked and returned (no origin parameter); external, protocol-relative, backslash and control-character forms fall back to `/`. It also URL-encodes the error message.
 - No new dependency, table, policy or grant. `lib/notes-db.ts` and the notes UI are unchanged.
 - Tests: `npm run test:auth` (`scripts/test-auth.mts`, plain Node, no framework).
 

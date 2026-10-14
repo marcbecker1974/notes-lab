@@ -1,8 +1,12 @@
 // Lightweight tests for the auth redirect logic. Run: npm run test:auth
 // (Node strips the TypeScript types; no test framework needed.)
 import assert from "node:assert/strict";
-import { resolveOAuthCallback } from "../lib/auth/oauth-callback.ts";
+import {
+  handleOAuthCallback,
+  resolveOAuthCallback,
+} from "../lib/auth/oauth-callback.ts";
 import { authErrorMessage } from "../lib/auth/messages.ts";
+import { canonicalLocalUrl } from "../lib/auth/dev-origin.ts";
 import { safeRedirectPath } from "../lib/auth/redirect.ts";
 
 const ORIGIN = "http://127.0.0.1:3000";
@@ -20,7 +24,7 @@ async function test(name: string, fn: () => void | Promise<void>) {
 // --- safeRedirectPath ---------------------------------------------------
 for (const good of ["/protected", "/notes?x=1#a", "/"]) {
   await test(`allows ${good}`, () =>
-    assert.equal(safeRedirectPath(good, ORIGIN, "/fb"), good));
+    assert.equal(safeRedirectPath(good, "/fb"), good));
 }
 const unsafe: [string, string | null | undefined][] = [
   ["absolute external URL", "https://evil.example/x"],
@@ -45,11 +49,16 @@ const unsafe: [string, string | null | undefined][] = [
 ];
 for (const [name, value] of unsafe) {
   await test(`rejects ${name}`, () =>
-    assert.equal(safeRedirectPath(value, ORIGIN, "/fb"), "/fb"));
+    assert.equal(safeRedirectPath(value, "/fb"), "/fb"));
 }
 await test("every accepted value is a single-slash path on our origin", () => {
-  for (const v of ["/%5Cevil.example", "/a/../b", "/./x", "/protected?next=//x"]) {
-    const out = safeRedirectPath(v, ORIGIN, "/fb");
+  for (const v of [
+    "/%5Cevil.example",
+    "/a/../b",
+    "/./x",
+    "/protected?next=//x",
+  ]) {
+    const out = safeRedirectPath(v, "/fb");
     assert.ok(out.startsWith("/") && !out.startsWith("//"), `${v} -> ${out}`);
     assert.equal(new URL(out, ORIGIN).origin, ORIGIN);
   }
@@ -105,7 +114,9 @@ await test("exchange throws -> oauth_failed", async () =>
 await test("provider access_denied -> oauth_cancelled, no exchange", async () => {
   let called = false;
   const path = await resolveOAuthCallback(
-    cb("?error=access_denied&error_code=unexpected_failure&error_description=x"),
+    cb(
+      "?error=access_denied&error_code=unexpected_failure&error_description=x",
+    ),
     async () => {
       called = true;
       return { error: null };
@@ -126,6 +137,62 @@ await test("provider error wins over a present code", async () =>
     await resolveOAuthCallback(cb("?code=abc&error=access_denied"), ok),
     "/auth/login?error=oauth_cancelled",
   ));
+
+// --- handleOAuthCallback (what the route returns) -----------------------
+// Simulates a browser that already has a session (e.g. email/password): the
+// exchange stub never looks at it, and a failed exchange must stay a failure.
+const loc = (r: Response) => `${r.status} ${r.headers.get("location")}`;
+await test("success -> 307 /protected (relative Location)", async () =>
+  assert.equal(
+    loc(await handleOAuthCallback(cb("?code=abc"), ok)),
+    "307 /protected",
+  ));
+await test("replayed/used code with an existing session is NOT a success", async () => {
+  const used = async () => ({ error: new Error("code already used") });
+  assert.equal(
+    loc(await handleOAuthCallback(cb("?code=used"), used)),
+    "307 /auth/login?error=oauth_failed",
+  );
+});
+await test("garbage code with an existing session is NOT a success", async () =>
+  assert.equal(
+    loc(
+      await handleOAuthCallback(cb("?code=x"), async () => ({
+        error: new Error("bad"),
+      })),
+    ),
+    "307 /auth/login?error=oauth_failed",
+  ));
+await test("provider cancel with an existing session -> cancelled, no exchange", async () => {
+  let called = false;
+  const r = await handleOAuthCallback(cb("?error=access_denied"), async () => {
+    called = true;
+    return { error: null };
+  });
+  assert.equal(loc(r), "307 /auth/login?error=oauth_cancelled");
+  assert.equal(called, false);
+});
+await test("Location is always relative", async () => {
+  for (const qs of [
+    "?code=abc",
+    "",
+    "?error=x",
+    "?code=a&next=https://evil.example",
+  ]) {
+    const l = (await handleOAuthCallback(cb(qs), ok)).headers.get("location")!;
+    assert.ok(l.startsWith("/") && !l.startsWith("//"), l);
+  }
+});
+
+// --- canonicalLocalUrl ----------------------------------------------------
+await test("localhost is mapped to 127.0.0.1; other hosts are left alone", () => {
+  assert.equal(
+    canonicalLocalUrl("http://localhost:3000/auth/login?a=1"),
+    "http://127.0.0.1:3000/auth/login?a=1",
+  );
+  assert.equal(canonicalLocalUrl("http://127.0.0.1:3000/auth/login"), null);
+  assert.equal(canonicalLocalUrl("https://example.com/"), null);
+});
 
 // --- messages -------------------------------------------------------------
 await test("known codes map to messages; unknown/proto keys do not", () => {

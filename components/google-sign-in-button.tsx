@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { canonicalLocalUrl } from "@/lib/auth/dev-origin";
 import { createClient } from "@/lib/supabase/client";
 import { useEffect, useState } from "react";
 
@@ -42,8 +43,15 @@ export function GoogleSignInButton() {
   }, []);
 
   const handleClick = async () => {
-    setIsLoading(true);
     setError(null);
+    const local = canonicalLocalUrl(window.location.href);
+    if (local) {
+      setError(
+        `Open the app at ${new URL(local).origin} (not localhost) to sign in with Google.`,
+      );
+      return;
+    }
+    setIsLoading(true);
     try {
       const supabase = createClient();
       const { error } = await supabase.auth.signInWithOAuth({

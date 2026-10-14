@@ -7,7 +7,9 @@ export async function AuthNotice({
   searchParams: Promise<{ error?: string | string[] }>;
 }) {
   const { error } = await searchParams;
-  const message = authErrorMessage(typeof error === "string" ? error : undefined);
+  const message = authErrorMessage(
+    typeof error === "string" ? error : undefined,
+  );
   if (!message) return null;
   return (
     <p role="alert" className="mb-4 text-sm text-red-500">
