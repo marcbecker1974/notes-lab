@@ -4,7 +4,8 @@
     "dev": "next dev -H 127.0.0.1",
     "build": "next build",
     "start": "next start -H 127.0.0.1",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:auth": "node scripts/test-auth.mts"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.2.1",

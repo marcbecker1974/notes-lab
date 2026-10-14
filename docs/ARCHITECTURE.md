@@ -8,7 +8,7 @@ Related: [PROJECT_BRIEF.md](./PROJECT_BRIEF.md)
 
 - **Simplest thing that works:** reuse the existing Next.js project and Supabase configuration; add no new services.
 - **Client-side data layer:** data is loaded once; collection selection, AND tag filtering and live search run in memory.
-- **No authentication in the MVP, but auth-ready:** anonymous access lives only in temporary database policies. The schema and application code do not depend on it.
+- **Notes are not user-protected, but auth-ready:** anonymous access lives only in temporary database policies. The schema and the notes code do not depend on it. Sign-in (Google and email/password) exists separately from notes (section 4a).
 - **One data-access point:** all database access goes through `lib/notes-db.ts`.
 
 ## 2. System components and data flow
@@ -24,7 +24,7 @@ Related: [PROJECT_BRIEF.md](./PROJECT_BRIEF.md)
 | supabase-js (browser client, `lib/supabase/client.ts`) | Data API client | Existing |
 | Supabase PostgreSQL (cloud) | Storage, migrations in `supabase/migrations/` | Existing project; 4 tables applied (migrations `…094205`, `…094206`, `…094208`) |
 
-**Not needed:** custom backend or API routes, auth flows, Realtime, Storage, Edge Functions, ORM, state-management library, search service, any external service. The template's `/auth/*` and `/protected` pages stay untouched and unused.
+**Not needed:** a custom backend, Realtime, Storage, Edge Functions, ORM, state-management library, search service, any external service beyond Supabase Auth with the Google provider (Feature 5). The only route handlers are the starter's `/auth/confirm` and the new `/auth/callback`; the starter's other `/auth/*` pages and `/protected` are otherwise unchanged.
 
 ### Data flow
 
@@ -148,9 +148,32 @@ Planned API:
 - Show a small "Demo mode: data is publicly accessible, don't store private notes" banner, implemented as a single constant that is easy to delete.
 - Keep `.env.local` out of Git (already covered by `.env*.local` in `.gitignore`), never put a service-role or secret key in the project, and add `supabase/.temp/` to `.gitignore` before committing.
 
+## 4a. Google sign-in (Feature 5)
+
+**Flow (PKCE, server-side completion).** (1) `components/google-sign-in-button.tsx` (on `/auth/login` and `/auth/sign-up`) calls `supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: <origin>/auth/callback } })`. (2) Google authenticates the user and returns to **Supabase**. (3) Supabase returns to **our app** at `/auth/callback?code=…`. (4) `app/auth/callback/route.ts` creates the per-request server client and calls `exchangeCodeForSession(code)`; `@supabase/ssr` writes the session cookies; the handler answers with a relative `Location: /protected`. (5) `lib/supabase/proxy.ts` refreshes the session on later requests (unchanged; `/auth/*` was already exempt).
+
+**Two different callbacks.**
+
+| Leg | URL | Configured where |
+|---|---|---|
+| Google → Supabase | `https://<project-ref>.supabase.co/auth/v1/callback` (project ref from `NEXT_PUBLIC_SUPABASE_URL`) | Google Cloud: Authorized redirect URI |
+| Supabase → app | `http://127.0.0.1:3000/auth/callback` | Supabase: Authentication → URL Configuration → Redirect URLs |
+
+Also in Supabase: Site URL `http://127.0.0.1:3000`, and Authentication → Providers → Google enabled with the client ID and secret (stored only there). The origin is `127.0.0.1` throughout (`npm run dev` binds `-H 127.0.0.1`); cookies are per origin, so mixing it with `localhost` loses the session or falls back to the Site URL.
+
+**Decisions.**
+- The destination is fixed (`/protected`); the callback ignores any `next` parameter.
+- Failures redirect to `/auth/login?error=<code>` with a fixed code (`oauth_cancelled`, `oauth_failed`, `oauth_missing_code`); `lib/auth/messages.ts` maps codes to text, so provider text is never displayed or reflected.
+- The callback answers with a **relative** `Location`: in dev, `request.nextUrl.origin` reported `localhost` for a `127.0.0.1` request, which would have switched origins and dropped the cookies.
+- `/auth/confirm` (starter, email links) now validates `next` with `safeRedirectPath` (`lib/auth/redirect.ts`): only absolute paths that resolve to the request's own origin; external, protocol-relative, backslash and control-character forms fall back to `/`. It also URL-encodes the error message.
+- No new dependency, table, policy or grant. `lib/notes-db.ts` and the notes UI are unchanged.
+- Tests: `npm run test:auth` (`scripts/test-auth.mts`, plain Node, no framework).
+
+**What this does not do.** Signing in does not make notes private: `/notes` stays open to `anon`, and the `TEMP anon` policies (repository evidence: `supabase/migrations/20261013094208_temp_anon_access.sql`, `to anon, authenticated using (true)`) plus grants give every `authenticated` user, now including anyone with a Google account, full access to all rows. Whether the deployed database matches the migrations has not been inspected. Not suitable for confidential data or production.
+
 ## 6. Future authentication migration plan
 
-1. **Enable sign-in:** create the user or enable sign-up with email confirmation. The existing `/auth/*` pages can be used.
+1. **Enable sign-in:** done for Google and email/password (section 4a). Decide whether sign-up should be restricted, since any Google account can now become an `authenticated` user.
 2. **Backfill:** `update … set user_id = '<owner uuid>' where user_id is null` on `collections`, `notes` and `tags`.
 3. **Constrain:** `alter column user_id set not null` on all three tables.
 4. **Replace policies:**
@@ -207,7 +230,7 @@ How this architecture supports the 12 course requirements (R) and the evaluation
 | `updated_at` via a PostgreSQL trigger | Correct for any client; no application code involved | One more database object to maintain |
 | Three-column UI with a shared note-card component | Meets R6/R9 (notes and tags in the sidebar) and keeps the agreed layout | Sidebar tree and middle list show overlapping notes, kept in sync from one state |
 | Nullable `user_id` with `default auth.uid()` | Makes the later ownership migration a backfill plus policy swap | Slightly more schema now |
-| Existing auth pages kept untouched and unused | Smallest diff; ready for the future migration | Dead code in the meantime |
+| Google sign-in added to the starter's auth pages (Feature 5) | Reuses Supabase Auth and the existing SSR setup; no new dependency | Sign-in does not yet protect notes (section 4a) |
 | PostgREST embedding for joins; counts computed in memory | No extra queries needed for note count badges | None at this scale |
 
 Dependencies (existing in `package.json`): Next.js (`latest`, uses the `proxy.ts` convention; **read `node_modules/next/dist/docs/` before writing code**, per `AGENTS.md`), React 19, TypeScript, Tailwind CSS 3.x, `@supabase/supabase-js` and `@supabase/ssr` (`latest`), and shadcn/ui primitives in `components/ui`. **UI library (decided): shadcn/ui + Tailwind CSS**, no other UI library. The notes UI added five Radix packages (`@radix-ui/react-alert-dialog`, `-collapsible`, `-scroll-area`, `-select`, `-separator`); the components were written in the repo's existing style against `@/lib/utils`. Everything else adds no new dependencies.
