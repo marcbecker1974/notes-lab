@@ -13,10 +13,14 @@ import {
   normalizeLinkInput,
   parseMarkdown,
   serializeMarkdown,
+  sourceModeNotice,
 } from "../lib/rich-text/markdown.ts";
 import { plainTextPreview, unescapeMarkdown } from "../lib/rich-text/preview.ts";
 import { matchesQuery } from "../lib/notes-view.ts";
 import { markdownFilename, noteToMarkdown, splitFrontMatter } from "../lib/note-markdown.ts";
+import { copyText } from "../lib/rich-text/copy-text.ts";
+import { changeMode, initialMode, modeNotice, restoreVisual } from "../lib/rich-text/editor-mode.ts";
+import { buildPreview, codeBlockTexts, isPreviewLink, type Block, type Inline } from "../lib/rich-text/preview-model.ts";
 
 const read = (path: string) => readFileSync(path, "utf8");
 let failed = 0;
@@ -298,13 +302,18 @@ test("opening, checking and cancelling never change the stored Markdown", () => 
   const copy = `${stored}`;
   checkVisualSafety(stored);
   assert.equal(stored, copy);
-  // The editor opens an unsafe note in source mode, and only reports user edits.
+  // The editor never opens an unsafe note in the visual editor (it opens in the read-only Preview, Feature 8.1),
+  // and only reports user edits.
   const component = read("components/notes/rich-text-editor.tsx");
-  assert.ok(component.includes('initial.safe ? "visual" : "source"'));
+  assert.ok(component.includes("initialMode(initial)"));
+  assert.equal(initialMode(checkVisualSafety(stored)), "preview");
   assert.ok(component.includes("!transaction.docChanged"));
   assert.ok(component.includes("emitUpdate: false"));
-  // Switching to visual is refused while the guard says unsafe.
-  assert.ok(/const check = checkVisualSafety\(value\);\s+if \(!check\.safe\) \{/.test(component));
+  // Switching to visual is refused while the guard says unsafe (the rule lives in changeMode, used by the editor).
+  assert.ok(component.includes("changeMode(target, mode, blocked, value)"));
+  const modes = read("lib/rich-text/editor-mode.ts");
+  assert.ok(/const check = checkVisualSafety\(value\);\s+if \(!check\.safe\) return \{ mode: current/.test(modes));
+  assert.equal(changeMode("visual", "preview", null, stored).loadVisual, false);
 });
 test("removing the front matter in source mode makes the note safe for visual mode again", () => {
   assert.equal(checkVisualSafety(FM_ONE.replace(/^---\n.*\n---\n\n/, "")).safe, true);
@@ -485,16 +494,16 @@ test("preview shows readable text: escapes undone, lone asterisks and numbers ke
 });
 test("the editor layer imports only approved Tiptap packages", () => {
   const approved = /^@tiptap\/(react|pm|starter-kit|markdown|extension-underline)($|\/)/;
-  for (const file of ["lib/rich-text/markdown.ts", "components/notes/rich-text-editor.tsx", "components/notes/editor-toolbar.tsx", "scripts/test-editor.mts"]) {
+  for (const file of ["lib/rich-text/markdown.ts", "components/notes/rich-text-editor.tsx", "components/notes/editor-toolbar.tsx", "components/notes/markdown-preview.tsx", "lib/rich-text/preview-model.ts", "lib/rich-text/editor-mode.ts", "scripts/test-editor.mts"]) {
     for (const m of read(file).matchAll(/from "(@tiptap\/[^"]+)"/g)) assert.ok(approved.test(m[1]), `${file}: ${m[1]}`);
   }
 });
 
 // --- Static checks ----------------------------------------------------------------------
-const editorFiles = ["components/notes/rich-text-editor.tsx", "components/notes/editor-toolbar.tsx"];
+const editorFiles = ["components/notes/rich-text-editor.tsx", "components/notes/editor-toolbar.tsx", "components/notes/markdown-preview.tsx"];
 test("editor files exist", () => editorFiles.forEach((f) => assert.ok(existsSync(f), f)));
 test("no unsafe HTML rendering, no database or Supabase access in the editor layer", () => {
-  const files = [...editorFiles, "lib/rich-text/markdown.ts", "lib/rich-text/preview.ts"];
+  const files = [...editorFiles, "lib/rich-text/markdown.ts", "lib/rich-text/preview.ts", "lib/rich-text/preview-model.ts", "lib/rich-text/editor-mode.ts", "lib/rich-text/copy-text.ts"];
   for (const file of files) {
     const source = read(file);
     assert.ok(!/dangerouslySetInnerHTML|innerHTML|outerHTML|insertAdjacentHTML/.test(source), `${file}: unsafe HTML`);
@@ -517,6 +526,382 @@ test("fullscreen uses CSS only, not the browser Fullscreen API", () => {
 test("no migration, policy or grant was added for Feature 8", () => {
   const names = readdirSync("supabase/migrations");
   assert.ok(!names.some((n) => /rich|editor|markdown/i.test(n)), names.join());
+});
+
+// --- Markdown Preview (Feature 8.1) -------------------------------------------------------
+// A note shaped like the imported Playbook notes (synthetic): a table with an escaped pipe, nested
+// lists, and a prompt in a fenced block with indentation, blank lines, angle brackets and quotes.
+const PROMPT = ['First line', '  indented line', '', 'after blank <tag> & "quotes"', '    deeper'].join("\n");
+const PLAYBOOK_LIKE = [
+  "## A. Overview",
+  "",
+  "| Step | Task | Notes |",
+  "|:--|---|--:|",
+  "| 00.01 | Scope and `code` | long text " + "word ".repeat(80).trim() + " |",
+  "| 00.02 | Escaped \\| pipe | **bold** |",
+  "",
+  "### Prompts",
+  "",
+  "- first",
+  "- second",
+  "  1. nested one",
+  "  2. nested two",
+  "",
+  "```text",
+  PROMPT,
+  "```",
+  "",
+].join("\n");
+const ORDINARY = "Just **bold** text\n\n- a\n- b";
+
+const kinds = (tree: Block[]) => tree.map((b) => b.kind);
+const plain = (inl: Inline[]): string => inl.map((i) => (i.kind === "text" || i.kind === "code" ? i.text : i.kind === "br" ? "\n" : plain(i.children))).join("");
+const asBlock = <K extends Block["kind"]>(tree: Block[], kind: K) => tree.find((b) => b.kind === kind) as Extract<Block, { kind: K }>;
+
+test("preview: headings, paragraphs and inline formatting", () => {
+  const tree = buildPreview("# One\n## Two\n### Three\n\nText **bold** *italic* <u>under</u> ~~gone~~ `code` [site](https://example.com).");
+  assert.deepEqual(kinds(tree), ["heading", "heading", "heading", "paragraph"]);
+  assert.deepEqual(tree.slice(0, 3).map((b) => (b.kind === "heading" ? b.level : 0)), [1, 2, 3]);
+  const p = asBlock(tree, "paragraph");
+  assert.deepEqual(p.children.map((i) => i.kind).filter((k) => k !== "text"), ["strong", "em", "u", "del", "code", "link"]);
+  const link = p.children.find((i) => i.kind === "link");
+  assert.ok(link && link.kind === "link" && link.href === "https://example.com");
+});
+test("preview: bullet, numbered, nested and task lists", () => {
+  const tree = buildPreview("- a\n- b\n  1. x\n  2. y\n\n3. three\n4. four\n\n- [x] done\n- [ ] todo");
+  const lists = tree.filter((b) => b.kind === "list") as Extract<Block, { kind: "list" }>[];
+  assert.equal(lists.length, 3);
+  assert.equal(lists[0].ordered, false);
+  assert.equal(lists[0].items.length, 2);
+  const nested = lists[0].items[1].blocks.find((b) => b.kind === "list") as Extract<Block, { kind: "list" }>;
+  assert.ok(nested && nested.ordered && nested.items.length === 2, "the nested numbered list is kept");
+  assert.equal(lists[1].ordered, true);
+  assert.equal(lists[1].start, 3, "a numbered list keeps its start number");
+  assert.deepEqual(lists[2].items.map((i) => [i.task, i.checked]), [[true, true], [true, false]]);
+});
+test("preview: blockquote and horizontal rule", () => {
+  const tree = buildPreview("> quoted *text*\n\n---\n\nafter");
+  assert.deepEqual(kinds(tree), ["quote", "hr", "paragraph"]);
+});
+
+test("preview tables: header, alignment, all rows and columns, escaped pipes, long cells", () => {
+  const table = asBlock(buildPreview(PLAYBOOK_LIKE), "table");
+  assert.deepEqual(table.header.map(plain), ["Step", "Task", "Notes"]);
+  assert.deepEqual(table.align, ["left", null, "right"]);
+  assert.equal(table.rows.length, 2);
+  assert.ok(table.rows.every((r) => r.length === 3), "every row keeps all columns");
+  assert.equal(plain(table.rows[1][1]), "Escaped | pipe", "an escaped pipe stays inside its cell");
+  assert.equal(plain(table.rows[0][2]), "long text " + "word ".repeat(80).trim(), "a long cell is kept in full");
+  assert.ok(table.rows[0][1].some((i) => i.kind === "code"));
+  assert.ok(table.rows[1][2].some((i) => i.kind === "strong"));
+  const wide = ["|" + Array.from({ length: 14 }, (_, i) => ` H${i} `).join("|") + "|", "|" + "---|".repeat(14), "|" + Array.from({ length: 14 }, (_, i) => ` c${i} `).join("|") + "|"].join("\n");
+  const w = asBlock(buildPreview(wide), "table");
+  assert.deepEqual([w.header.length, w.rows.length, w.rows[0].length], [14, 1, 14], "a wide table keeps every column (the view scrolls sideways)");
+});
+test("preview tables: several tables and tables between other content", () => {
+  const tree = buildPreview("Intro\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nMiddle\n\n| c |\n|---|\n| 3 |\n\nEnd");
+  assert.deepEqual(kinds(tree), ["paragraph", "table", "paragraph", "table", "paragraph"]);
+});
+
+test("preview code blocks: the text is exactly the original, with its language", () => {
+  const tree = buildPreview(PLAYBOOK_LIKE);
+  const code = asBlock(tree, "code");
+  assert.equal(code.lang, "text");
+  assert.equal(code.text, PROMPT, "indentation, blank lines, brackets and quotes are preserved");
+  assert.deepEqual(codeBlockTexts(tree), [PROMPT]);
+  const two = buildPreview("```\none\n```\n\ntext\n\n````md\n```inner```\n````\n");
+  assert.deepEqual(codeBlockTexts(two), ["one", "```inner```"], "several blocks, and a longer outer fence keeps an inner one");
+  const inList = buildPreview("- item\n\n  ```sh\n  echo hi\n  ```\n");
+  assert.deepEqual(codeBlockTexts(inList), ["echo hi"]);
+});
+
+test("preview safety: raw HTML is text, images are alt text, only http, https and mailto become links", () => {
+  const tree = buildPreview("<script>alert(1)</script>\n\nText <b onclick=\"x()\">hi</b> ![pic](http://x/y.png) [a](javascript:alert(1)) [b](data:text/html,x) [c](relative/page) [d](mailto:a@b.co) [e](http://ok.example)");
+  const json = JSON.stringify(tree);
+  assert.ok(!/"kind":"(script|img|html-element)"/.test(json));
+  assert.equal(asBlock(tree, "html").text, "<script>alert(1)</script>", "a raw HTML block is shown as its own text");
+  const p = asBlock(tree, "paragraph");
+  assert.ok(plain(p.children).includes('<b onclick="x()">hi</b>'), "inline HTML is shown as text");
+  assert.ok(plain(p.children).includes("pic"), "an image is shown as its alt text");
+  const hrefs = p.children.flatMap((i) => (i.kind === "link" ? [i.href] : []));
+  assert.deepEqual(hrefs, ["mailto:a@b.co", "http://ok.example"]);
+  for (const text of ["a", "b", "c"]) assert.ok(plain(p.children).includes(text), `the text of the refused link ${text} stays visible`);
+  for (const bad of ["javascript:alert(1)", "JaVaScRiPt:alert(1)", "java\tscript:x", "data:text/html,x", "file:///etc/passwd", "ftp://x", "tel:123", "relative/page", "#top", "", undefined]) assert.equal(isPreviewLink(bad as string | undefined), false, String(bad));
+  for (const ok of ["https://a.example", "http://a.example", "mailto:a@b.co"]) assert.equal(isPreviewLink(ok), true, ok);
+});
+test("preview: empty and unusual input never throws", () => {
+  assert.deepEqual(buildPreview(""), []);
+  for (const s of ["\n\n\n", "|", "| a |", "```", "- ", "> ", "#", "\u0000​", "x".repeat(20000), "[".repeat(2000), "*".repeat(2000)]) {
+    assert.doesNotThrow(() => buildPreview(s), s.slice(0, 12));
+  }
+  assert.ok(buildPreview("```\nunclosed fence\nstill code").some((b) => b.kind === "code"));
+});
+
+test("copy: the exact text is written, failures and a missing clipboard are reported, nothing else happens", async () => {
+  const written: string[] = [];
+  const ok = await copyText(PROMPT, { writeText: async (s) => void written.push(s) });
+  assert.equal(ok, true);
+  assert.deepEqual(written, [PROMPT], "complete text, byte for byte");
+  assert.equal(await copyText(PROMPT, { writeText: async () => { throw new Error("denied"); } }), false);
+  assert.equal(await copyText(PROMPT, undefined), false);
+  const fromTree = codeBlockTexts(buildPreview(PLAYBOOK_LIKE))[0];
+  const w2: string[] = [];
+  await copyText(fromTree, { writeText: async (s) => void w2.push(s) });
+  assert.equal(w2[0], PROMPT, "what the button copies is the original prompt");
+});
+
+test("modes: ordinary notes keep the visual editor, notes the guard blocks open in Preview", () => {
+  assert.equal(initialMode(checkVisualSafety(ORDINARY)), "visual");
+  assert.equal(initialMode(checkVisualSafety(PLAYBOOK_LIKE)), "preview");
+  assert.equal(initialMode(checkVisualSafety("")), "visual");
+  for (const unsafe of ["| a |\n|---|\n| 1 |", "![i](http://x/y.png)", "- [ ] task", "<div>x</div>", "---\ntitle: x\n---\n\nbody"]) {
+    assert.equal(initialMode(checkVisualSafety(unsafe)), "preview", unsafe.slice(0, 20));
+  }
+});
+test("modes: the guard still refuses the visual editor for unsafe content, in every mode", () => {
+  for (const current of ["preview", "source"] as const) {
+    const refused = changeMode("visual", current, null, PLAYBOOK_LIKE);
+    assert.equal(refused.mode, current, "the mode does not change");
+    assert.equal(refused.loadVisual, false, "nothing is converted");
+    assert.ok(refused.blocked?.includes("tables"));
+  }
+});
+test("modes: switching is possible where it is safe, and never carries text or an edit", () => {
+  const toVisual = changeMode("visual", "preview", null, ORDINARY);
+  assert.deepEqual(toVisual, { mode: "visual", blocked: null, refused: null, loadVisual: true });
+  for (const target of ["preview", "source"] as const) {
+    const change = changeMode(target, "visual", ["tables"], PLAYBOOK_LIKE);
+    assert.deepEqual(change, { mode: target, blocked: ["tables"], refused: null, loadVisual: false });
+  }
+  assert.deepEqual(Object.keys(changeMode("preview", "source", null, "x")).sort(), ["blocked", "loadVisual", "mode", "refused"], "the result holds no note text");
+  assert.equal(changeMode("source", "preview", ["tables"], PLAYBOOK_LIKE).mode, "source", "an unsafe note can always be edited as source");
+});
+test("data preservation: building the preview or switching modes changes neither the text nor the guard's verdict", () => {
+  const before = JSON.stringify(checkVisualSafety(PLAYBOOK_LIKE));
+  const copy = String(PLAYBOOK_LIKE);
+  buildPreview(PLAYBOOK_LIKE);
+  changeMode("preview", "visual", null, PLAYBOOK_LIKE);
+  changeMode("visual", "preview", null, PLAYBOOK_LIKE);
+  assert.equal(PLAYBOOK_LIKE, copy);
+  assert.equal(JSON.stringify(checkVisualSafety(PLAYBOOK_LIKE)), before);
+  assert.equal(noteToMarkdown({ title: "T", body: PLAYBOOK_LIKE }), `# T\n\n${PLAYBOOK_LIKE.replace(/\n+$/, "")}\n`, "export still writes the saved body unchanged");
+});
+
+test("preview wiring (static): read-only component, no save or dirty path, mode switch reports nothing", () => {
+  const preview = read("components/notes/markdown-preview.tsx");
+  assert.ok(/export function MarkdownPreview\(\{ source, className \}/.test(preview), "the preview takes only the text to show");
+  assert.ok(!/onChange|onDraftChange|onSave|onCancel|useEditor|supabase/.test(preview));
+  assert.ok(/type="button"/.test(preview), "the Copy button never submits a form");
+  assert.ok(/copyText\(/.test(preview) && !/execCommand/.test(preview));
+  const editor = read("components/notes/rich-text-editor.tsx");
+  assert.ok(/<MarkdownPreview source=\{value\} \/>/.test(editor), "the editor passes text only, no callbacks");
+  const select = /function selectMode\([\s\S]*?\n  }\n/.exec(editor)?.[0] ?? "";
+  assert.ok(select.length > 100 && !/onChange|onChangeRef|lastSynced\.current = /.test(select.replace(/lastSynced\.current = value;/, "")), "switching modes does not report an edit");
+  assert.ok(/emitUpdate:\s*false/.test(select), "loading the visual editor is never reported as an edit");
+});
+test("preview styling (static): tables scroll sideways, code keeps its line breaks", () => {
+  const css = read("app/globals.css");
+  assert.ok(/\.md-table-wrap\s*\{[^}]*overflow-x-auto/.test(css));
+  assert.ok(/\.md-code pre\s*\{[^}]*white-space:\s*pre-wrap/.test(css));
+});
+test("no Markdown renderer or highlighter package was added for the preview", () => {
+  const pkg = JSON.parse(read("package.json")) as { dependencies: Record<string, string>; devDependencies: Record<string, string> };
+  const all = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+  assert.ok(!all.some((n) => /^(react-markdown|remark|rehype|markdown-it|marked|dompurify|sanitize-html|highlight\.js|prismjs|shiki)/.test(n)), all.join());
+});
+
+// The first 600 characters of a plain-prose body, as the preview has always shown them.
+const cleanFirst600 = (body: string) => body.slice(0, 600).replace(/\s+/g, " ").trim();
+// --- Final refinements of Feature 8.1 ------------------------------------------------------
+test("notice: Preview shows no compatibility warning, also for a note that opens there because of a table", () => {
+  const blocked = ["tables"];
+  assert.equal(modeNotice("preview", blocked, null), null, "a note that opens in Preview shows no warning");
+  assert.equal(modeNotice("preview", null, null), null);
+  assert.equal(modeNotice("visual", null, null), null);
+  assert.equal(modeNotice("visual", blocked, null), null);
+});
+test("notice: Markdown source still explains why the note is edited as source (unchanged)", () => {
+  assert.equal(modeNotice("source", ["tables"], null), sourceModeNotice(["tables"]));
+  assert.match(modeNotice("source", ["tables", "HTML"], null) ?? "", /tables, HTML/);
+  assert.equal(modeNotice("source", null, null), null, "an ordinary note edited as source shows nothing");
+});
+test("notice: asking for the visual editor on an unsupported note is refused and explained, in Preview too", () => {
+  const change = changeMode("visual", "preview", ["tables"], PLAYBOOK_LIKE);
+  assert.equal(change.mode, "preview", "the guard still prevents unsafe visual editing");
+  assert.equal(change.loadVisual, false);
+  assert.ok(change.refused?.includes("tables"));
+  const text = modeNotice("preview", change.blocked, change.refused);
+  assert.ok(text && /^This note contains tables.*which the visual editor cannot keep intact/.test(text), text ?? "");
+  assert.ok(/Markdown source/.test(text ?? "") && /nothing was changed/.test(text ?? ""), "it says where to edit and that nothing changed");
+  // the explanation goes away with the next mode change
+  assert.equal(changeMode("source", "preview", change.blocked, PLAYBOOK_LIKE).refused, null);
+  assert.equal(changeMode("preview", "source", change.blocked, PLAYBOOK_LIKE).refused, null);
+  // an ordinary note is never refused
+  assert.equal(changeMode("visual", "preview", null, ORDINARY).refused, null);
+});
+test("notice (static): the editor takes its notice from modeNotice and keeps the guard in changeMode", () => {
+  const editor = read("components/notes/rich-text-editor.tsx");
+  assert.ok(editor.includes("modeNotice(mode, blocked, refused)"));
+  assert.ok(!/previewNotice|sourceModeNotice\(/.test(editor), "no ad-hoc notice logic in the component");
+  assert.ok(editor.includes("changeMode(target, mode, blocked, value)"));
+  assert.ok(/setRefused\(change\.refused\)/.test(editor));
+});
+
+test("note list preview: a table never shows its pipes or separator rows while the note has prose", () => {
+  const body = ["## Overview", "", "| Field | Value |", "|:--|--:|", "| Chapter | 00 |", "| Title | **Setup** |", "", "This note explains the *setup* of the project."].join("\n");
+  const preview = plainTextPreview(body);
+  assert.equal(preview, "Overview This note explains the setup of the project.");
+  assert.ok(!/[|]|-{2,}/.test(preview));
+});
+test("note list preview: separator rows in every common form are dropped", () => {
+  for (const sep of ["|---|---|", "| --- | --- |", "|:--|:-:|--:|", "--|--", ":--|--:", "|-|-|", "  |---|  "]) {
+    const preview = plainTextPreview(`Intro text\n\n| a | b |\n${sep}\n| 1 | 2 |\n\nAfter text`);
+    assert.equal(preview, "Intro text After text", sep);
+  }
+  assert.equal(plainTextPreview("Intro\n\n---\n\nOutro"), "Intro Outro", "a plain rule is not a table separator");
+});
+test("note list preview: a note that is only tables shows the text of its cells, readable", () => {
+  const body = "| Step | Task |\n|---|---|\n| 00.01 | Scope and **evidence** |\n| 00.02 | Escaped \\| pipe |";
+  const preview = plainTextPreview(body);
+  assert.equal(preview, "Step · Task 00.01 · Scope and evidence 00.02 · Escaped | pipe");
+  assert.ok(!/---/.test(preview));
+});
+test("note list preview: prose is preferred over code; a note that is only code shows the code", () => {
+  assert.equal(plainTextPreview("```text\nconst a = 1;\n```\n\nThe explanation of the code."), "The explanation of the code.");
+  assert.equal(plainTextPreview("Before\n\n```sh\nnpm run dev\n```\n\nAfter"), "Before After");
+  assert.equal(plainTextPreview("```text\nFirst line of a prompt\n  indented\n```"), "First line of a prompt indented");
+  assert.equal(plainTextPreview("~~~\ntilde fenced\n~~~"), "tilde fenced");
+  assert.equal(plainTextPreview("| a |\n|---|\n\n```\ncode here\n```"), "a", "tables come before code as the fallback");
+});
+test("note list preview: unusual input falls back gracefully and never throws", () => {
+  for (const body of ["", "\n\n", "|", "|||", "| |\n|---|", "```", "```\n", "---", "x".repeat(20000), "| a | b |\n".repeat(3000), "```\n" + "line\n".repeat(5000)]) {
+    assert.doesNotThrow(() => plainTextPreview(body), body.slice(0, 10));
+    assert.ok(plainTextPreview(body).length <= 600);
+  }
+  assert.equal(plainTextPreview("|---|---|"), "|---|---|", "a lone separator line (no header above it) is ordinary text, as before");
+  assert.equal(plainTextPreview("| a | b |\n".repeat(3000)).length <= 600, true);
+});
+test("note list preview: notes without tables or code give exactly the same preview as before", () => {
+  const cases: [string, string][] = [
+    ["# T\n\n**b** <u>u</u> [l](https://a.b)\n- x", "T b u l x"],
+    ["1986. A good year", "1986. A good year"],
+    ["Plain text only.\nSecond line.", "Plain text only. Second line."],
+    ["> quote\n\n- a\n- b", "quote a b"],
+  ];
+  for (const [body, expected] of cases) assert.equal(plainTextPreview(body), expected);
+  const long = Array.from({ length: 200 }, (_, i) => `word${i}`).join(" ");
+  assert.equal(plainTextPreview(long), cleanFirst600(long));
+});
+test("note list preview: the stored Markdown is only read, and the guard's verdict does not change", () => {
+  const before = JSON.stringify(checkVisualSafety(PLAYBOOK_LIKE));
+  const copy = String(PLAYBOOK_LIKE);
+  plainTextPreview(PLAYBOOK_LIKE);
+  assert.equal(PLAYBOOK_LIKE, copy);
+  assert.equal(JSON.stringify(checkVisualSafety(PLAYBOOK_LIKE)), before);
+  const preview = plainTextPreview(PLAYBOOK_LIKE);
+  assert.ok(preview.startsWith("A. Overview"), preview);
+  assert.ok(!/[|]|:--|---/.test(preview), preview);
+  assert.ok(!/(^|\s)\*\*|`/.test(preview), "no Markdown marks are left");
+});
+
+// --- Review corrections of Feature 8.1 (independent review, 2026-10-15) ---------------------------
+test("M1: a note with YAML front matter is previewed as its own block, not as a rule and a heading", () => {
+  const body = "---\ntitle: Notes\ntags: [a, b]\n---\n\n# Body title\n\nText.";
+  const tree = buildPreview(body);
+  assert.deepEqual(kinds(tree), ["code", "heading", "paragraph"]);
+  const front = asBlock(tree, "code");
+  assert.equal(front.lang, "yaml");
+  assert.equal(front.text, "---\ntitle: Notes\ntags: [a, b]\n---", "the metadata is shown as written");
+  assert.ok(!kinds(tree).includes("hr"));
+  assert.equal(codeBlockTexts(tree)[0], front.text);
+  // only front matter; CRLF and a BOM are handled like the guard and the export handle them
+  assert.deepEqual(kinds(buildPreview("---\nk: v\n---")), ["code"]);
+  assert.deepEqual(kinds(buildPreview("---\r\nk: v\r\n---\r\n\r\nBody")), ["code", "paragraph"]);
+  assert.deepEqual(kinds(buildPreview("﻿---\nk: v\n---\n\nBody")), ["code", "paragraph"]);
+  // not front matter: an ordinary rule between paragraphs, and an unclosed block, render as before
+  assert.deepEqual(kinds(buildPreview("Intro\n\n---\n\nOutro")), ["paragraph", "hr", "paragraph"]);
+  assert.equal(kinds(buildPreview("---\nk: v\nno closing line")).includes("code"), false);
+});
+test("M2: tables without a leading pipe are recognised, in the note-list preview too", () => {
+  assert.equal(plainTextPreview("Name | Age\n--- | ---\nAnn | 30\n\nSome prose"), "Some prose");
+  assert.equal(plainTextPreview("a|b\n-|-\n1|2"), "a · b 1 · 2", "a table-only note shows its cells");
+  assert.equal(plainTextPreview("Before\n\nName | Age\n:-- | --:\nAnn | 30\nBob | 41\n\nAfter"), "Before After");
+  assert.equal(plainTextPreview("Intro\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\nNot a row\n"), "Intro Not a row", "rows end at the first line without a pipe");
+  assert.equal(plainTextPreview("A | B is not a table\n\nplain"), "A | B is not a table plain", "a pipe without a separator row stays prose");
+});
+test("L3: notes without tables or fenced code give exactly the same preview as before (differential test)", () => {
+  // The implementation on main, copied exactly.
+  const before = (body: string) =>
+    unescapeMarkdown(body.slice(0, 600))
+      .replace(/```[^\n]*\n?/g, "")
+      .replace(/!\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)/g, "$1")
+      .replace(/\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)/g, "$1")
+      .replace(/<\/?u>/g, "")
+      .replace(/^\s{0,3}(#{1,6}\s+|>\s?|[-*+]\s+(\[[ xX]\]\s+)?|\d{1,3}[.)]\s+(?=\S)|(-{3,}|\*{3,}|_{3,})\s*$)/gm, "")
+      .replace(/\*\*|__|~~|`/g, "")
+      .replace(/\*(?=\S)([^*\n]*\S)\*/g, "$1")
+      .replace(/\s+/g, " ")
+      .trim();
+  for (const body of ["x\n*", "*", "-", "#", ">", "| starts with pipe\nmore", "|x", "text\n\n---\n\nmore", "a\n- \nb"]) assert.equal(plainTextPreview(body), before(body), JSON.stringify(body));
+  const lines = ["plain text here", "# Title", "## Sub", "- a", "* b", "+ c", "1. one", "2) two", "> quote", "---", "***", "___", "", "   ", "**bold** and *it*", "[l](http://x.y)", "snake\\_case", "5 &lt; 6", "*", "-", "#", ">", "text with `code`", "<u>u</u>", "| a", "| a |", "|x", "tab\there", "äöü \u{1f600}"];
+  let seed = 12345;
+  const next = (n: number) => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) % n);
+  for (let i = 0; i < 3000; i++) {
+    const body = Array.from({ length: 1 + next(40) }, () => lines[next(lines.length)]).join(next(7) === 0 ? "\r\n" : "\n");
+    assert.equal(plainTextPreview(body), before(body), JSON.stringify(body.slice(0, 80)));
+  }
+});
+test("L4: long lines are cheap in the note list (no quadratic matching)", () => {
+  const worst = ["|-" + " ".repeat(19990) + "x", " ".repeat(19990) + "|x", "\t".repeat(19990) + "|-", "|" + "-".repeat(19990) + "x", "|-".repeat(9990) + "x", "a|".repeat(9990)];
+  for (const body of worst) {
+    const t0 = performance.now();
+    plainTextPreview(body);
+    plainTextPreview(`${body}\n${body}`);
+    assert.ok(performance.now() - t0 < 50, `${body.slice(0, 12)}... took ${(performance.now() - t0).toFixed(0)} ms`);
+  }
+});
+test("L5: column alignment applies to header and body cells", () => {
+  const table = asBlock(buildPreview("| L | C | R | D |\n|:--|:-:|--:|---|\n| 1 | 2 | 3 | 4 |"), "table");
+  assert.deepEqual(table.align, ["left", "center", "right", null]);
+  const component = read("components/notes/markdown-preview.tsx");
+  assert.ok(/ALIGN_CLASS\[align \?\? "left"\]/.test(component), "an unaligned column is left-aligned by class");
+  assert.ok(/<th key=\{j\} scope="col" className=\{alignClass\(block\.align\[j\]\)\}/.test(component), "header cells take the alignment class");
+  const css = read("app/globals.css");
+  const th = /\.md-preview th\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  assert.ok(th.length > 0 && !/text-(left|center|right)/.test(th), "no CSS rule on th may override the alignment classes");
+});
+test("L6: only fenced code blocks get a Copy button", () => {
+  const tree = buildPreview("    indented code\n\n```sh\nnpm run dev\n```\n");
+  const codes = tree.filter((b) => b.kind === "code") as Extract<Block, { kind: "code" }>[];
+  assert.deepEqual(codes.map((c) => c.fenced), [false, true]);
+  assert.deepEqual(codeBlockTexts(tree), ["npm run dev"], "the button list holds fenced blocks only");
+  assert.equal(codes[0].text, "indented code", "an indented block is still shown, unchanged");
+  assert.ok(/\{fenced && \(/.test(read("components/notes/markdown-preview.tsx")));
+});
+test("L7: each Copy button has a name that says which block it copies; the result is announced separately", () => {
+  const component = read("components/notes/markdown-preview.tsx");
+  assert.ok(/aria-label=\{`Copy \$\{lang \|\| "code"\} block`\}/.test(component));
+  assert.ok(/role="status" className="sr-only"/.test(component), "Copied and Copy failed reach screen readers");
+});
+
+test("Cancel (existed before Feature 8.1): the restored saved text is checked again and never loaded into the visual editor when it is not safe", () => {
+  const savedWithTable = "Intro\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
+  const restored = restoreVisual(savedWithTable);
+  assert.equal(restored.loadVisual, false, "unsupported Markdown is not loaded into the visual editor");
+  assert.equal(restored.mode, "preview", "the note falls back to the read-only Preview");
+  assert.ok(restored.refused?.includes("tables") && restored.blocked?.includes("tables"));
+  assert.match(modeNotice(restored.mode, restored.blocked, restored.refused) ?? "", /tables.*visual editor cannot keep intact/, "the user is told why the mode changed");
+  for (const unsafe of ["![i](http://x/y.png)", "- [ ] task", "<div>x</div>", "---\ntitle: x\n---\n\nbody"]) assert.equal(restoreVisual(unsafe).loadVisual, false, unsafe.slice(0, 18));
+  assert.deepEqual(restoreVisual(ORDINARY), { mode: "visual", blocked: null, refused: null, loadVisual: true }, "a safe saved text is restored into the visual editor as before");
+  assert.deepEqual(Object.keys(restored).sort(), ["blocked", "loadVisual", "mode", "refused"], "the result holds no note text: the draft stays the restored saved text");
+});
+test("Cancel (static): the reset effect asks the guard before it loads anything into the editor", () => {
+  const editor = read("components/notes/rich-text-editor.tsx");
+  const effect = /\/\/ Cancel \(or any reset from outside\)[\s\S]*?\n  \}, \[editor, mode, value\]\);/.exec(editor)?.[0] ?? "";
+  assert.ok(effect.length > 200, "the effect was found");
+  assert.ok(effect.indexOf("restoreVisual(value)") > -1 && effect.indexOf("restoreVisual(value)") < effect.indexOf("setContent("), "the guard runs first");
+  assert.ok(/if \(restored\.loadVisual\) \{\s*editor\.commands\.setContent/.test(effect), "setContent only when the guard allows it");
+  assert.ok(!/onChange|onDraftChange/.test(effect), "restoring is never reported as an edit");
 });
 
 if (failed > 0) {

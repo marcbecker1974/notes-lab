@@ -121,3 +121,93 @@
     @apply my-4 border-border;
   }
 }
+
+/* Read-only Markdown Preview (Feature 8.1): formatted view of a note body. */
+@layer components {
+  .md-preview {
+    @apply min-h-[420px] px-6 py-4 text-[17px] leading-[1.6];
+    overflow-wrap: anywhere;
+  }
+  .md-preview > * + * {
+    @apply mt-4;
+  }
+  .md-preview h1 {
+    @apply text-3xl font-bold leading-tight;
+  }
+  .md-preview h2 {
+    @apply mt-8 text-2xl font-semibold leading-tight;
+  }
+  .md-preview h3 {
+    @apply mt-6 text-xl font-semibold leading-snug;
+  }
+  .md-preview h4,
+  .md-preview h5,
+  .md-preview h6 {
+    @apply mt-5 text-lg font-semibold;
+  }
+  .md-preview ul {
+    @apply list-disc pl-6;
+  }
+  .md-preview ol {
+    @apply list-decimal pl-6;
+  }
+  .md-preview li > * + *,
+  .md-preview li > div > * + * {
+    @apply mt-1;
+  }
+  .md-preview li + li {
+    @apply mt-1;
+  }
+  .md-preview a {
+    @apply text-primary underline underline-offset-2;
+  }
+  .md-preview blockquote {
+    @apply border-l-4 border-border pl-4 text-muted-foreground;
+  }
+  .md-preview :not(pre) > code {
+    @apply rounded bg-muted px-1 py-0.5 font-mono text-[0.9em];
+  }
+  .md-preview hr {
+    @apply my-6 border-border;
+  }
+  .md-preview .md-raw-html {
+    @apply overflow-x-auto rounded-md border border-dashed bg-muted/30 p-3 font-mono text-sm;
+    white-space: pre-wrap;
+  }
+  /* Fenced code (Claude Code prompts): a distinct container with a Copy button. */
+  .md-preview .md-code {
+    @apply overflow-hidden rounded-md border bg-muted/40;
+  }
+  .md-preview .md-code-bar {
+    @apply flex min-h-9 items-center justify-between border-b bg-muted/70 px-3 py-0.5 text-xs text-muted-foreground;
+  }
+  .md-preview .md-code pre {
+    @apply p-3 font-mono text-sm leading-relaxed;
+    white-space: pre-wrap; /* keeps indentation and line breaks, wraps long lines */
+    overflow-wrap: anywhere;
+  }
+  /* Tables scroll sideways when wide; cells wrap long text. */
+  .md-preview .md-table-wrap {
+    @apply max-w-full overflow-x-auto rounded-md border;
+  }
+  .md-preview table {
+    @apply w-full border-collapse text-[15px] leading-snug;
+  }
+  .md-preview th,
+  .md-preview td {
+    @apply min-w-[7rem] border-b border-r px-3 py-2 align-top;
+  }
+  .md-preview th:last-child,
+  .md-preview td:last-child {
+    @apply border-r-0;
+  }
+  .md-preview tbody tr:last-child td {
+    @apply border-b-0;
+  }
+  .md-preview th {
+    @apply bg-muted/60 font-semibold;
+  }
+  .md-preview tbody tr:nth-child(even) td {
+    @apply bg-muted/20;
+  }
+}
