@@ -8,16 +8,17 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { changeMode, initialMode, modeNotice, restoreVisual, type EditorMode } from "@/lib/rich-text/editor-mode";
 import {
   LINK_ERROR,
   checkVisualSafety,
   contentExtensions,
   normalizeLinkInput,
   serializeMarkdown,
-  sourceModeNotice,
 } from "@/lib/rich-text/markdown";
 import { cn } from "@/lib/utils";
 import { EditorToolbar } from "./editor-toolbar";
+import { MarkdownPreview } from "./markdown-preview";
 
 type RichTextEditorProps = {
   /** The note body as Markdown (the draft). */
@@ -28,16 +29,19 @@ type RichTextEditorProps = {
 };
 
 /**
- * Visual editor (Tiptap) and Markdown source editor for a note body. The draft stays
- * a Markdown string, so Save, Cancel and unsaved-changes handling are the note
- * editor's own. Nothing is reported while a note is only opened, converted or shown
- * in another mode: the original Markdown is kept exactly until the user edits.
+ * Read-only Preview, visual editor (Tiptap) and Markdown source editor for a note body. The
+ * draft stays a Markdown string, so Save, Cancel and unsaved-changes handling are the note
+ * editor's own. Nothing is reported while a note is only opened, converted or shown in another
+ * mode (Preview included): the original Markdown is kept exactly until the user edits.
+ * A note the visual editor cannot keep intact opens in Preview and is edited in source mode.
  */
 export function RichTextEditor({ value, onChange, invalid }: RichTextEditorProps) {
   // Decided once per opened note (the parent keys this component by note id).
   const [initial] = useState(() => checkVisualSafety(value));
-  const [mode, setMode] = useState<"visual" | "source">(initial.safe ? "visual" : "source");
+  const [mode, setMode] = useState<EditorMode>(() => initialMode(initial));
   const [blocked, setBlocked] = useState<string[] | null>(initial.safe ? null : initial.reasons);
+  // Set when the user asked for the visual editor and the guard refused: explained until the mode changes.
+  const [refused, setRefused] = useState<string[] | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkValue, setLinkValue] = useState("");
@@ -71,11 +75,19 @@ export function RichTextEditor({ value, onChange, invalid }: RichTextEditorProps
     },
   });
 
-  // Cancel (or any reset from outside) puts the saved Markdown back into the editor.
+  // Cancel (or any reset from outside) puts the saved Markdown back into the editor, but only if the
+  // guard still says the visual editor can keep it intact; otherwise the note falls back to Preview.
   useEffect(() => {
     if (!editor || mode !== "visual" || value === lastSynced.current) return;
-    editor.commands.setContent(value, { emitUpdate: false, contentType: "markdown" });
+    const restored = restoreVisual(value);
     lastSynced.current = value;
+    if (restored.loadVisual) {
+      editor.commands.setContent(value, { emitUpdate: false, contentType: "markdown" });
+    } else {
+      setBlocked(restored.blocked);
+      setRefused(restored.refused);
+      setMode(restored.mode);
+    }
   }, [editor, mode, value]);
 
   // Escape leaves full screen.
@@ -88,23 +100,19 @@ export function RichTextEditor({ value, onChange, invalid }: RichTextEditorProps
     return () => window.removeEventListener("keydown", onKey);
   }, [fullscreen]);
 
-  function toggleSource() {
-    if (mode === "visual") {
-      setLinkOpen(false);
-      setMode("source");
-      return;
-    }
-    const check = checkVisualSafety(value);
-    if (!check.safe) {
-      setBlocked(check.reasons);
-      return;
-    }
-    if (editor) {
+  // Switching is never an edit: nothing is reported to the parent and no text changes. The guard
+  // still decides about the visual editor (refused for content it cannot keep intact).
+  function selectMode(target: EditorMode) {
+    if (target === mode) return;
+    const change = changeMode(target, mode, blocked, value);
+    setBlocked(change.blocked);
+    setRefused(change.refused);
+    if (change.loadVisual && editor) {
       editor.commands.setContent(value, { emitUpdate: false, contentType: "markdown" });
       lastSynced.current = value;
     }
-    setBlocked(null);
-    setMode("visual");
+    if (target !== "visual") setLinkOpen(false);
+    setMode(change.mode);
   }
 
   function toggleLink() {
@@ -141,6 +149,8 @@ export function RichTextEditor({ value, onChange, invalid }: RichTextEditorProps
     setLinkOpen(false);
   }
 
+  const notice = modeNotice(mode, blocked, refused);
+
   return (
     <div
       className={cn(
@@ -151,11 +161,11 @@ export function RichTextEditor({ value, onChange, invalid }: RichTextEditorProps
     >
       <EditorToolbar
         editor={editor}
-        sourceMode={mode === "source"}
+        mode={mode}
         fullscreen={fullscreen}
         linkOpen={linkOpen}
         onToggleLink={toggleLink}
-        onToggleSource={toggleSource}
+        onModeChange={selectMode}
         onToggleFullscreen={() => setFullscreen((on) => !on)}
       />
 
@@ -215,9 +225,9 @@ export function RichTextEditor({ value, onChange, invalid }: RichTextEditorProps
         </form>
       )}
 
-      {blocked && (
+      {notice && (
         <p role="status" className="border-b bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-          {sourceModeNotice(blocked)}
+          {notice}
         </p>
       )}
 
@@ -225,6 +235,7 @@ export function RichTextEditor({ value, onChange, invalid }: RichTextEditorProps
         <div className={mode === "visual" ? undefined : "hidden"}>
           <EditorContent editor={editor} />
         </div>
+        {mode === "preview" && <MarkdownPreview source={value} />}
         {mode === "source" && (
           <Textarea
             id="note-body"

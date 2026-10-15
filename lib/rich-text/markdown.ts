@@ -55,6 +55,14 @@ function markdown(): MarkdownManager {
   return manager;
 }
 
+/**
+ * The Markdown token tree (GitHub-flavoured: tables, task lists, strikethrough), from the same
+ * instance the editor and the guard use. Read-only Preview (Feature 8.1) renders these tokens.
+ */
+export function lexMarkdown(source: string): unknown[] {
+  return markdown().instance.lexer(source) as unknown as unknown[];
+}
+
 /** Markdown as saved, without the trailing blank lines the serializer appends. */
 export function serializeMarkdown(doc: JSONContent): string {
   return markdown().serialize(doc).replace(/\s+$/, "");
@@ -213,6 +221,11 @@ export function checkVisualSafety(source: string): VisualCheck {
     reasons.add("content that could not be converted");
   }
   return reasons.size === 0 ? { safe: true } : { safe: false, reasons: [...reasons] };
+}
+
+/** The explanation shown when the user asks for the visual editor on a note it cannot keep intact. */
+export function visualRefusedNotice(reasons: string[]): string {
+  return `This note contains ${reasons.join(", ")}, which the visual editor cannot keep intact, so the visual editor is not available for it. Use Markdown source to edit it; nothing was changed.`;
 }
 
 /** A sentence for the notice shown above the source editor. */
