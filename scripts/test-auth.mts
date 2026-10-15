@@ -817,6 +817,78 @@ await test("isolation tests: refuse to write while anonymous can read; credentia
   }
 });
 
+await test("isolation test 11: 428C9 only for identity-column cases, every attempt evaluated on its own", () => {
+  const code = RLS_TEST.replace(/\/\/[^\n]*/g, "");
+  assert.equal(
+    (code.match(/428C9/g) ?? []).length,
+    1,
+    "428C9 appears once, as a named constant",
+  );
+  assert.ok(/IDENTITY_REFUSAL = "428C9"/.test(code));
+  assert.ok(
+    /identity\s*&&\s*r\.error !== null\s*&&\s*r\.error\.code === IDENTITY_REFUSAL/.test(
+      code,
+    ),
+    "the identity code is only accepted when the case is flagged",
+  );
+  assert.ok(
+    /identity: field === "id"/.test(code),
+    "only id fields are flagged as identity cases",
+  );
+  const from = code.indexOf('"ownership and system-managed fields');
+  const block = code.slice(
+    from,
+    code.indexOf('"tags cannot be deleted by clients'),
+  );
+  assert.ok(from > -1 && block.length > 100);
+  assert.ok(
+    block.includes("refused(r, c.identity === true)") &&
+      block.includes("failures.push("),
+  );
+  assert.equal(
+    (block.match(/\bassert\./g) ?? []).length,
+    1,
+    "one final assert: no case can stop the others",
+  );
+  assert.ok(
+    (block.match(/\n\s+(ins|upd)\(/g) ?? []).length >= 20,
+    "at least 20 protected-field cases",
+  );
+  for (const f of ["user_id", "created_at", "updated_at", "name"])
+    assert.ok(block.includes(`"${f}"`), f);
+});
+
+await test("test-tag cleanup script: inert by default, atomic, exactly tags 114 and 115, never touches accounts", () => {
+  const c = sqlCode(src("supabase/maintenance/cleanup_test_tags.sql"));
+  assert.ok(
+    /v_approved constant boolean := false;/.test(c),
+    "the committed script must be inert",
+  );
+  assert.ok(!/\b(commit|rollback|truncate|drop|alter|grant|revoke)\b/i.test(c));
+  assert.equal(
+    (c.match(/\bdo \$\$/g) ?? []).length,
+    1,
+    "one DO statement = atomic",
+  );
+  const deletes = c.match(/delete from[\s\S]*?;/g) ?? [];
+  assert.equal(deletes.length, 1);
+  assert.ok(
+    /delete from public\.tags where id in \(114, 115\);/.test(deletes[0]),
+    "only the two approved ids",
+  );
+  assert.ok(/[0-9a-f]{32}/.test(c), "the fingerprint guard is present");
+  assert.ok(
+    /note_tags where tag_id in \(114, 115\)/.test(c),
+    "unused tags only",
+  );
+  assert.ok(/provider\W+= 'email'/.test(c), "never the Google journal account");
+  for (const m of c.matchAll(/auth\.\w+/g)) assert.equal(m[0], "auth.users");
+  assert.ok(
+    !/(insert|update)[^;]*(auth\.|public\.tags)/i.test(c),
+    "no writes besides the one delete",
+  );
+});
+
 if (failed) {
   console.error(`\n${failed} test(s) failed`);
   process.exit(1);

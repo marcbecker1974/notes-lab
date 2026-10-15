@@ -73,6 +73,15 @@ const denied = (r: Res) =>
   r.error !== null &&
   (r.error.code === "42501" || r.status === 401 || r.status === 403);
 const code = (r: Res) => r.error?.code ?? (r.error ? "error" : "none");
+// A protected-field attempt must be refused. Permission and RLS failures come back as 42501
+// (HTTP 401 or 403). Writing an explicit value to the GENERATED ALWAYS identity column "id"
+// is refused earlier, while the statement is analysed, with 428C9 (it never reaches the
+// privilege check). That code is accepted ONLY for cases marked `identity`; any other error,
+// and success, is a failure.
+const IDENTITY_REFUSAL = "428C9";
+const refused = (r: Res, identity: boolean) =>
+  denied(r) ||
+  (identity && r.error !== null && r.error.code === IDENTITY_REFUSAL);
 const rows = (r: Res): Record<string, unknown>[] => {
   assert.equal(r.error, null, `unexpected error ${code(r)}`);
   return (r.data ?? []) as Record<string, unknown>[];
@@ -423,43 +432,107 @@ t(
 t(
   "ownership and system-managed fields cannot be written by clients",
   async () => {
-    const bad: [string, Record<string, unknown>][] = [
-      ["notes", { title: `${PREFIX}-own`, user_id: S.B.id }],
-      ["notes", { title: `${PREFIX}-own`, id: 2147480000 }],
-      ["notes", { title: `${PREFIX}-own`, created_at: "2000-01-01T00:00:00Z" }],
-      ["notes", { title: `${PREFIX}-own`, updated_at: "2000-01-01T00:00:00Z" }],
-      ["collections", { name: `${PREFIX}-own`, user_id: S.B.id }],
-      ["collections", { name: `${PREFIX}-own`, id: 2147480000 }],
-      ["tags", { name: `${PREFIX}-own`, user_id: S.B.id }],
-      ["tags", { name: `${PREFIX}-own`, created_at: "2000-01-01T00:00:00Z" }],
+    type Case = {
+      label: string;
+      table: string;
+      op: "insert" | "update";
+      payload: Record<string, unknown>;
+      id?: number; // the row an update targets
+      identity?: boolean; // writes to the GENERATED ALWAYS "id" column
+    };
+    const old = "2000-01-01T00:00:00Z";
+    const ins = (
+      table: string,
+      base: Record<string, unknown>,
+      field: string,
+      value: unknown,
+    ): Case => ({
+      label: `insert ${table}.${field}`,
+      table,
+      op: "insert",
+      payload: { ...base, [field]: value },
+      identity: field === "id",
+    });
+    const upd = (
+      table: string,
+      id: number,
+      field: string,
+      value: unknown,
+    ): Case => ({
+      label: `update ${table}.${field}`,
+      table,
+      op: "update",
+      id,
+      payload: { [field]: value },
+      identity: field === "id",
+    });
+    const nb = { title: `${PREFIX}-own` };
+    const cb = { name: `${PREFIX}-own` };
+    const cases: Case[] = [
+      ins("notes", nb, "user_id", S.B.id),
+      ins("notes", nb, "id", 2147480000),
+      ins("notes", nb, "created_at", old),
+      ins("notes", nb, "updated_at", old),
+      ins("collections", cb, "user_id", S.B.id),
+      ins("collections", cb, "id", 2147480000),
+      ins("collections", cb, "created_at", old),
+      ins("tags", cb, "user_id", S.B.id),
+      ins("tags", cb, "id", 2147480000),
+      ins("tags", cb, "created_at", old),
+      upd("notes", S.a.note, "user_id", S.B.id),
+      upd("notes", S.a.note, "id", 2147480001),
+      upd("notes", S.a.note, "created_at", old),
+      upd("notes", S.a.note, "updated_at", old),
+      upd("collections", S.a.collection, "user_id", S.B.id),
+      upd("collections", S.a.collection, "id", 2147480001),
+      upd("collections", S.a.collection, "name", `${PREFIX}-renamed`),
+      upd("collections", S.a.collection, "created_at", old),
+      upd("tags", S.a.tag, "user_id", S.B.id),
+      upd("tags", S.a.tag, "id", 2147480001),
+      upd("tags", S.a.tag, "name", `${PREFIX}-renamed`),
+      upd("tags", S.a.tag, "created_at", old),
     ];
-    for (const [table, row] of bad) {
-      const r = (await S.A.client.from(table).insert(row).select("id")) as Res;
-      assert.ok(
-        denied(r),
-        `insert ${table} ${Object.keys(row).join(",")}: expected denial, got ${code(r)}`,
+    // Every attempt is evaluated on its own: one unexpected result never hides the others.
+    const failures: string[] = [];
+    for (const c of cases) {
+      let r: Res;
+      try {
+        r =
+          c.op === "insert"
+            ? ((await S.A.client
+                .from(c.table)
+                .insert(c.payload)
+                .select("id")) as Res)
+            : ((await S.A.client
+                .from(c.table)
+                .update(c.payload)
+                .eq("id", c.id as number)
+                .select("id")) as Res);
+      } catch {
+        failures.push(`${c.label}: request failed`);
+        console.error(`     case FAIL ${c.label}: request failed`);
+        continue;
+      }
+      const ok = refused(r, c.identity === true);
+      if (!ok) failures.push(`${c.label}: got ${code(r)}`);
+      console.log(
+        `     case ${ok ? "ok  " : "FAIL"} ${c.label}: ${ok ? `refused (${code(r)})` : `NOT refused (${code(r)})`}`,
       );
     }
-    const upd: [string, number, Record<string, unknown>][] = [
-      ["notes", S.a.note, { user_id: S.B.id }],
-      ["notes", S.a.note, { id: 2147480001 }],
-      ["notes", S.a.note, { created_at: "2000-01-01T00:00:00Z" }],
-      ["notes", S.a.note, { updated_at: "2000-01-01T00:00:00Z" }],
-      ["collections", S.a.collection, { user_id: S.B.id }],
-      ["collections", S.a.collection, { name: `${PREFIX}-renamed` }],
-      ["tags", S.a.tag, { user_id: S.B.id }],
-      ["tags", S.a.tag, { name: `${PREFIX}-renamed` }],
-    ];
-    for (const [table, id, patch] of upd) {
-      const r = (await S.A.client
-        .from(table)
-        .update(patch)
-        .eq("id", id)
-        .select("id")) as Res;
-      assert.ok(
-        denied(r),
-        `update ${table} ${Object.keys(patch).join(",")}: expected denial, got ${code(r)}`,
+    // Nothing the attempts could have written may exist, and A's note is unchanged.
+    for (const [table, column] of [
+      ["notes", "title"],
+      ["collections", "name"],
+      ["tags", "name"],
+    ] as const) {
+      const made = rows(
+        await S.A.client
+          .from(table)
+          .select("id")
+          .like(column, `${PREFIX}-own%`),
       );
+      if (made.length)
+        failures.push(`${table}: ${made.length} probe row(s) were created`);
     }
     const n = one(
       await S.A.client
@@ -468,7 +541,13 @@ t(
         .eq("id", S.a.note)
         .single(),
     );
-    assert.ok(n.user_id === S.A.id && n.id === S.a.note, "ownership unchanged");
+    if (!(n.user_id === S.A.id && n.id === S.a.note))
+      failures.push("A's note changed ownership or id");
+    assert.equal(
+      failures.length,
+      0,
+      `${failures.length} of ${cases.length} case(s) failed: ${failures.join("; ")}`,
+    );
   },
 );
 t(
@@ -765,10 +844,30 @@ async function cleanup() {
       }
     }
   }
-  if (S.A)
-    console.log(
-      `\nleftover by design: tags named "${SHARED_TAG}" (one per account; clients cannot delete tags)`,
-    );
+  // Clients cannot delete tags, so report exactly what is left (ids only; never credentials).
+  if (S.A && S.B) {
+    for (const u of [S.A, S.B]) {
+      const keep = (await u.client
+        .from("tags")
+        .select("id")
+        .eq("name", SHARED_TAG)) as Res;
+      const odd = (await u.client
+        .from("tags")
+        .select("id")
+        .like("name", `${PREFIX}%`)) as Res;
+      const ids = (keep.data ?? []) as { id: number }[];
+      const stray = (odd.data ?? []) as { id: number }[];
+      console.log(
+        `leftover by design, account ${u.name}: tag "${SHARED_TAG}" ids [${ids.map((x) => x.id).join(", ")}] (clients cannot delete tags)`,
+      );
+      if (stray.length) {
+        failed++;
+        console.error(
+          `UNEXPECTED leftover tag(s) of this run for account ${u.name}: ids [${stray.map((x) => x.id).join(", ")}]`,
+        );
+      }
+    }
+  }
 }
 
 try {
