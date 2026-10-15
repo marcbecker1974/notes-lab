@@ -14,6 +14,7 @@ import {
   identityAfterCheck,
 } from "../lib/auth/latest.ts";
 import { existsSync, readFileSync } from "node:fs";
+import { markdownFilename, noteToMarkdown } from "../lib/note-markdown.ts";
 import {
   LOGIN_PATH,
   hasVerifiedUser,
@@ -926,6 +927,78 @@ await test("the obsolete demo-mode banner is gone (the data is private since the
       f,
     );
   }
+});
+
+// ---- Feature 9: Markdown export of a note ----------------------------------
+
+await test("export: title becomes an H1 and the body follows unchanged", () => {
+  assert.equal(
+    noteToMarkdown({ title: "Plan", body: "First line\n\n- item\n[link](https://example.com)" }),
+    "# Plan\n\nFirst line\n\n- item\n[link](https://example.com)\n",
+  );
+});
+
+await test("export: Markdown the user typed is not escaped or altered", () => {
+  const body = "## Heading\n* a\n* b\n`code` **bold** _it_ > quote";
+  assert.ok(noteToMarkdown({ title: "T", body }).includes(`\n\n${body}\n`));
+});
+
+await test("export: Unicode and line breaks are preserved, CRLF becomes LF", () => {
+  const out = noteToMarkdown({ title: "Größe – 日本語 🚀", body: "ä ö ü ß\r\nzweite Zeile\rdritte\n\nvierte" });
+  assert.equal(out, "# Größe – 日本語 🚀\n\nä ö ü ß\nzweite Zeile\ndritte\n\nvierte\n");
+  assert.ok(!out.includes("\r"));
+});
+
+await test("export: an empty or blank body gives just the heading", () => {
+  assert.equal(noteToMarkdown({ title: "Only title", body: "" }), "# Only title\n");
+  assert.equal(noteToMarkdown({ title: "Only title", body: " \n\n  \n" }), "# Only title\n");
+});
+
+await test("export: trailing newlines are normalised to one; a multi-line title stays one line", () => {
+  assert.equal(noteToMarkdown({ title: "A\nB  C", body: "x\n\n\n" }), "# A B C\n\nx\n");
+});
+
+await test("export: the file name is the title plus .md and keeps Unicode", () => {
+  assert.equal(markdownFilename("My plan"), "My plan.md");
+  assert.equal(markdownFilename("Größe – 日本語"), "Größe – 日本語.md");
+});
+
+await test("export: unsafe file name characters never survive", () => {
+  const name = markdownFilename('a/b\\c:d*e?f"g<h>i|j\u0000k\u202el');
+  assert.match(name, /\.md$/);
+  assert.ok(!/[\\/:*?"<>|\u0000-\u001f\u202e]/.test(name), name);
+  assert.equal(name, "a-b-c-d-e-f-g-h-i-j-k-l.md");
+  assert.equal(markdownFilename("../../etc/passwd"), "etc-passwd.md");
+});
+
+await test("export: dots, spaces and hyphens at the ends are trimmed; empty names fall back", () => {
+  assert.equal(markdownFilename("  .hidden.  "), "hidden.md");
+  assert.equal(markdownFilename("..."), "note.md");
+  assert.equal(markdownFilename("///"), "note.md");
+  assert.equal(markdownFilename(""), "note.md");
+});
+
+await test("export: Windows reserved names are prefixed, long titles are shortened", () => {
+  assert.equal(markdownFilename("CON"), "_CON.md");
+  assert.equal(markdownFilename("lpt1"), "_lpt1.md");
+  assert.equal(markdownFilename("con.report"), "_con.report.md");
+  assert.equal(markdownFilename("console"), "console.md");
+  const long = markdownFilename("x".repeat(500));
+  assert.equal(long, `${"x".repeat(80)}.md`);
+  // shortened by characters, not UTF-16 units: no split emoji
+  assert.equal(Array.from(markdownFilename("🚀".repeat(200)).slice(0, -3)).length, 80);
+});
+
+await test("export: the module is pure, the download is client-side and the database layer is untouched", () => {
+  const lib = src("lib/note-markdown.ts");
+  assert.ok(!/^\s*import\s/m.test(lib), "lib/note-markdown.ts must have no imports");
+  const dl = src("components/notes/download-markdown.ts");
+  assert.ok(/URL\.createObjectURL/.test(dl) && /\.download\s*=/.test(dl));
+  assert.ok(!/supabase|fetch\(|notes-db/.test(dl), "download helper makes no request");
+  assert.ok(!/markdown/i.test(src("lib/notes-db.ts")), "notes-db.ts is unchanged by Feature 9");
+  const app = src("components/notes/notes-app.tsx");
+  assert.ok(/downloadNoteAsMarkdown\(selectedNote\)/.test(app), "exports the saved note, not the draft");
+  assert.ok(!/downloadNoteAsMarkdown\(\s*(draft|activeDraft)/.test(app));
 });
 
 if (failed) {
