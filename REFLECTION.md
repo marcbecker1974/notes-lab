@@ -911,3 +911,76 @@ A separate read-only agent reviewed the working-tree diff against `main` and rep
 - **Accepted cosmetic limitation.** A title that already ends in `.md` exports as `x.md.md`. It is harmless and left unchanged.
 - **Verification by the reviewer.** `npm run test:auth` passed (including the 10 export checks), `tsc --noEmit` and ESLint on `lib`, `components` and `scripts` were clean, and `git diff --check` was clean. Real calls of `markdownFilename` and `noteToMarkdown` on edge cases confirmed: Windows reserved names (`CON`, `con.report`, `COM¹`) prefixed with `_` and `Console` unchanged; unsafe and direction-override characters replaced; blank titles give `note.md`; names of 300 ASCII characters, 100 emoji and 150 CJK characters stay at or below 203 bytes including `.md`; CRLF becomes LF and a multi-line title becomes one line. The three `/code-review` fixes were confirmed effective. The export uses the saved `selectedNote`, never the draft, makes no request, and leaves `lib/notes-db.ts`, `package.json`, migrations and Supabase configuration untouched. No secrets or unrelated files are in the PR diff. The reviewer did not run `build` or `test:rls`.
 - **Limits.** The Safari tests are owner-reported and were not observed by the reviewer. The other accepted limitations (plain text only, Markdown characters in titles not escaped, Export enabled while unsaved by owner decision, no automated browser test, one browser) are unchanged.
+
+## Feature 8: Rich-text editor (`feature/rich-text-editor`), status: implemented, manual tests passed, `/code-review` done, uncommitted (2026-10-15)
+
+**Status: implemented; automated checks pass; the owner's eight manual browser tests passed (owner-reported, below); the required `/code-review` was run and its findings handled (below). Nothing is committed, pushed or merged; the separate-session PR review is still required. No Supabase, Auth, RLS, grant, migration or user-data change.**
+
+- **Decisions (owner).** Tiptap with its Markdown extension; Markdown in the existing `notes.body`; underline as inline `<u>…</u>`; no migration; code fences, blockquotes, strikethrough and rules preserved without buttons; unsupported content must never be dropped silently; mobile editing deferred; read-only inventory of existing notes approved.
+- **Architecture assessment (summary).** Markdown storage beat HTML or JSON storage: the draft stays a string (Save, Cancel and dirty state unchanged), existing plain-text notes need no migration or format marker, export stays unchanged, the 20,000 limit needs no change, and source mode is natural. Tiptap beat Lexical (no underline Markdown transformer, more wiring, pre-1.0) and Quill (Delta format, no Markdown, community React wrappers).
+- **Spike findings (headless, synthetic data, before implementation).** Round trips are stable for paragraphs, line breaks, headings, bold, italic, links, nested lists, numbered lists, fences, blockquotes, strikethrough, rules and Unicode. Real problems found: (1) underline is serialized as `++x++` by default; (2) with `<u>` written by a simple renderer, Markdown inside it stayed literal (`<u>*x* y</u>` came back with literal asterisks), fixed by a custom inline tokenizer; (3) silent loss: tables vanish, images become alt text, task-list checkboxes are dropped, footnotes become a bogus link, raw HTML such as `<script>` is stripped, and prose like `List<string>` loses the tag; (4) cosmetic changes (`_x_` to `*x*`, `*` bullets to `-`, escaping, `<` stored as `&lt;`); (5) the serializer appends trailing blank lines; (6) `javascript:` links render inert but stay in the stored Markdown; (7) escaping can grow special-character-heavy text from 19,000 to 24,700 characters.
+- **Implementation.** See `docs/ARCHITECTURE.md` section 9.2. The guard (`checkVisualSafety`) is layered, not an alphanumeric comparison alone: markdown tokens (tables, images, HTML, task items), footnote pattern outside code, then a round-trip comparison of words, link targets and code. Unsafe notes open in source mode with a notice and cannot be switched to visual until safe.
+- **Trade-offs.** The conversion tests run without a DOM (`MarkdownManager` directly), so no jsdom dependency was added; the cost is that toolbar clicks, source and full-screen switching and the Save/Cancel wiring are not automatically tested, only the code paths they depend on and static checks (no `onSave`, no `dangerouslySetInnerHTML`, no Fullscreen API, no database access in the editor layer). Full screen is CSS only (`fixed inset-0`), not the browser API (unreliable in Safari). Search and the card preview work on stored Markdown; the preview strips marks, search can match marks (accepted). Visual editing of a note re-serializes it, which normalises Markdown cosmetically (accepted, documented); the original is never rewritten unless the user edits.
+- **Results (2026-10-15, uncommitted tree).** `npm run test:editor`: 74 checks, all passed (toolbar output, round trips, underline combinations and the spike regressions, plain text, guard, links, hostile input, 20,000 limit, export compatibility, static checks); a mutation check (underline written as `++`) made 7 tests fail, so they are not vacuous. `npm run test:auth`: 118 checks, all passed (one new rich-text export check). `npm run test:rls -- --dry-run` lists 18 tests (not run live: no database change). `tsc --noEmit`, `npm run lint` and `npm run build` pass; `git diff --check` is clean.
+- **Inventory of existing notes.** Not possible for the owner's notes: they are under the owner's Google account and RLS, and only the publishable key and test-account logins are available (a service-role key is forbidden); test accounts would show only their own rows. The committed seed migrations contain no tables, images, task items, fences or HTML tags (counts only). The guard exists precisely because the real notes are unknown.
+- **Known limitations.** Mobile editing (below 768px) unchanged and deferred; cosmetic Markdown normalisation on visual edits; special-character-heavy notes near 20,000 characters can exceed the limit after serialization (Save blocked, nothing cut); tables, images, task lists, footnotes and raw HTML are edited only in source mode; search can match Markdown marks; `tel:` and `ftp:` links in old notes stay in the text but are not clickable.
+- **J. Manual browser tests required (owner, Safari).** (1) Open an existing plain-text note: it is not marked as changed; edit and save; reload. (2) Each toolbar function: Normal, H1, H2, H3, bold, italic, underline, link insert, edit and remove, bulleted and numbered list; save and reload and check the formatting. (3) Underline combined with bold and italic, saved and reloaded. (4) Source mode: the Markdown matches the visual content; edit it and return to visual; unsaved changes stay unsaved until Save. (5) Full screen: toolbar usable, Exit and Escape work, content kept, nothing saved or cancelled by it. (6) Cancel after edits restores the saved note. (7) A link with `javascript:alert(1)` is refused. (8) A note with a table or an image opens in source mode with the notice and keeps its text through Save. (9) Export a formatted note and check the `.md` file (underline as `<u>`), and that unsaved changes are not exported. (10) Create, delete, collections, tags and search still work; a second account cannot see the note.
+
+### Feature 8: manual browser tests (owner-reported, 2026-10-15; I did not observe them)
+
+The owner ran all eight tests in Safari and reported PASS for each. The detailed steps are list J above (it lists ten steps; the owner grouped them into A to H). Limits: one browser, the owner's report only (no screenshots or file contents were shared with me), and the tests ran against the code before the review fixes below, so the fixed areas (search, preview, bare URLs, link-bar Escape, full-screen limit message, label) are covered only by automated tests until re-checked.
+
+| Test | Result | Covers |
+|---|---|---|
+| A. Toolbar functionality | PASS | Normal, H1 to H3, bold, italic, underline, link insert/edit/remove, bulleted and numbered lists |
+| B. Save and reload formatting | PASS | formatting identical after Save and reload; existing notes opened and edited |
+| C. Markdown source mode | PASS | source matches the visual content; edits in either mode reflected; no automatic unsaved change |
+| D. Fullscreen editing | PASS | toolbar usable, Exit and Escape, content kept, nothing saved or cancelled |
+| E. Markdown export | PASS | formatted note exported as `.md` (underline as `<u>`), saved version only |
+| F. Cancel unsaved changes | PASS | Cancel restores the saved note in both modes |
+| G. Lossy-content protection | PASS | notes with unsupported structures open in source mode with the notice and keep their text |
+| H. User isolation | PASS | a second account cannot see the note |
+
+### Feature 8: required `/code-review` (high effort, 2026-10-15)
+
+Run on the uncommitted diff against `main` (the `/code-review` skill in a forked session, plus my own read of the diff). Ten findings, none critical or high. All verified by running the code unless noted.
+
+| # | Severity | Finding | Decision |
+|---|---|---|---|
+| 1 | Medium | A visual edit re-serializes a note and rewrites its stored encoding: `snake_case` becomes `snake\_case`, `2 * 3` becomes `2 \* 3`, `C:\Users` becomes `C:\\Users`, `5 &lt; 6` is stored as `5 &amp;lt; 6`; the guard compares words, so it cannot see this | **Accepted limitation** (cosmetic: the visible text and the Markdown meaning are the same; a note is rewritten only when the user edits and saves). Mitigated by fixes 2 and 3. Making the guard reject every such note would send most notes to source mode. |
+| 2 | Medium | Live search matched the stored (escaped) Markdown, so text the user sees (`snake_case`, `5 < 6`) was not found | **Fixed**: `matchesQuery` also searches the unescaped body; raw Markdown (URLs) still matches |
+| 3 | Low | Card preview left escapes and entities visible, mangled `2 * 3`, a leading `1986. `, and URLs with parentheses | **Fixed**: `unescapeMarkdown`, safer regexes, same behaviour for readable text |
+| 4 | Low | Preview ran about nine regex passes over up to 20,000 characters for every card on every keystroke | **Fixed**: only the first 600 characters are processed |
+| 5 | Medium | Bare URLs, autolinks and e-mail addresses were always sent to source mode (the serializer writes `[url](url)`), so many notes would never open visually | **Fixed**: a self-link `[x](x)` counts as the same content; link targets are still compared |
+| 6 | Low | The guard compared link targets only on the token side, so `[a](<b c>)` passed and would stop being a link after the next save | **Fixed**: the serialized text is re-read and its links must match; such notes open in source mode |
+| 7 | Low | Whole-document serialization on every change and the guard on mount are synchronous | **Accepted**: measured about 30 ms for 18,000 characters in the spike; debouncing would add state that can lag behind Save |
+| 8 | Low | `lib/rich-text/markdown.ts` imported types from `@tiptap/core`, which is not a declared dependency | **Fixed**: types come from the approved `@tiptap/react`; a test checks that the editor layer imports only approved Tiptap packages |
+| 9 | Low | The "Content" label pointed at an id that exists only in source mode (an accessibility regression) | **Fixed**: both the visual editor and the source textarea are labelled through `aria-labelledby` |
+| 10 | Low | Escape in the link bar also left full screen, and full screen hid the over-limit message | **Fixed**: Escape closes only the link bar; the full-screen bar shows the over-limit message |
+
+- **Also fixed (documentation drift found in my own review).** `CLAUDE.md` and `docs/ARCHITECTURE.md` still described Features 8 and 9 as not implemented.
+- **Accepted limitations after the review.** Cosmetic re-encoding on the first visual edit (finding 1); numeric character references such as `&#169;` send a note to source mode; link input that looks like `host:port` (for example `localhost:3000`) is rejected as an unknown protocol; the visual label click does not focus the editor.
+- **Results after the fixes.** `npm run test:editor`: 81 checks, all passed (7 new for findings 2, 3, 5, 6, 8 and the numeric-reference case); `npm run test:auth`: 118 checks, all passed; `tsc --noEmit`, `npm run lint`, `npm run build` and `git diff --check` clean. Not re-run in a browser: the full-screen and link-bar changes (findings 9 and 10) need a quick manual re-check.
+- **Not yet done.** Separate-session review of the PR, commit, push, PR and merge.
+
+### Feature 8: post-review browser tests (owner-reported, 2026-10-15; I did not observe them)
+
+After the review fixes the owner repeated the affected areas in Safari. Limits: one browser, the owner's report only.
+
+| Test | Result | Covers (review finding) |
+|---|---|---|
+| I. Search with special characters | PASS | search finds text the editor stored escaped (finding 2) |
+| J. Note preview | PASS | the note-list preview shows readable text (findings 3 and 4) |
+| K. Link editing and full screen | PASS | link bar and full screen after the Escape and over-limit-message fixes (findings 9 and 10) |
+
+### Feature 8: security tests L, M and M3 (owner-reported, 2026-10-15; I did not observe them)
+
+Disposable `ZZ-F8` notes only, deleted afterwards with the existing delete function. Limits: one browser (Safari), the owner's report only, no screenshots or console output shared with me.
+
+| Test | Result | What the owner reported |
+|---|---|---|
+| L. `javascript:` links | PASS | unsafe `javascript:` links were rejected; the permitted link behaviour (http, https, mailto) was verified |
+| M. HTML script content | PASS | script content did not execute; no JavaScript alert appeared; the HTML stayed preserved after Save and a browser reload; the editor opened in Markdown source mode with the protection notice |
+| M3. Script markup typed in the visual editor | PASS | did not execute |
+
+Together with the automated hostile-input and link tests, this is the evidence for PR-RTE-01.4. Final state of Feature 8 verification: manual tests A to H, I to K, L, M and M3 all PASS (owner-reported); `/code-review` run, 8 of 10 findings fixed, 2 accepted. Documented limitations kept: cosmetic Markdown re-encoding on the first visual edit; synchronous processing of long notes; tables, images, task lists, footnotes and raw HTML are edited in source mode only; mobile editing below 768px deferred (PR-MOB-01); the 20,000-character limit counts the saved Markdown and blocks Save when exceeded.

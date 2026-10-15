@@ -1,10 +1,13 @@
 // Markdown export of a single note (Feature 9). Pure and import-free so `npm run
 // test:auth` (plain Node) can test it. It works on the saved note only: the title
-// becomes an H1 and the plain-text body follows unchanged (any Markdown the user
-// typed keeps its meaning). No collection, tags or other metadata are exported.
+// becomes an H1 and the body follows unchanged. No collection, tags or other
+// metadata are exported.
 //
-// Revisit when Feature 8 (rich-text editor) changes the note content format: the
-// body is exported as-is here, which is only correct while it is plain text.
+// Since Feature 8 the body is Markdown written by the rich-text editor (or plain
+// text from before), so exporting it unchanged is correct. The only inline HTML the
+// editor writes is `<u>text</u>` for underline: standard Markdown has no underline
+// syntax, and CommonMark allows inline HTML, so most viewers show it underlined and
+// the others show the plain text.
 
 type ExportableNote = { title: string; body: string };
 

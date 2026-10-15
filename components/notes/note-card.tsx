@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 import type { Note, Tag } from "@/lib/notes-db";
 import { TagChip } from "./tag-chip";
+import { plainTextPreview } from "@/lib/rich-text/preview";
 
 type NoteCardProps = {
   note: Note;
@@ -32,7 +33,7 @@ export function NoteCard({ note, tags, selected, onSelect }: NoteCardProps) {
       <span className="block truncate text-base font-semibold leading-5">{note.title}</span>
       {note.body && (
         <span className="mt-1 line-clamp-2 block text-[13px] leading-5 text-muted-foreground">
-          {note.body}
+          {plainTextPreview(note.body)}
         </span>
       )}
       <span className="mt-2 flex items-end justify-between gap-3">

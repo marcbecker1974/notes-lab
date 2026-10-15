@@ -15,7 +15,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import {
   NAME_MAX,
   NOTE_BODY_MAX,
@@ -28,6 +27,7 @@ import { PALETTE, type PaletteKey } from "@/lib/palette";
 import { cn } from "@/lib/utils";
 import { ColorSwatchMenu } from "./color-swatch-menu";
 import { EmptyState } from "./empty-state";
+import { RichTextEditor } from "./rich-text-editor";
 
 export type Draft = { title: string; body: string };
 
@@ -193,17 +193,21 @@ export function NoteEditor(props: NoteEditorProps) {
           </div>
 
           <div className="space-y-1.5">
-            <FieldLabel htmlFor="note-body" required>
+            <FieldLabel htmlFor="note-body" id="note-body-label" required>
               Content
             </FieldLabel>
-            <Textarea
-              id="note-body"
+            <RichTextEditor
+              key={note.id}
               value={draft.body}
-              onChange={(event) => props.onDraftChange({ ...draft, body: event.target.value })}
-              className="min-h-[460px] resize-y border-border p-6 text-[17px] leading-[1.4] shadow-none md:text-[17px]"
-              placeholder="Write your note..."
-              aria-invalid={bodyBad}
+              onChange={(body) => props.onDraftChange({ ...draft, body })}
+              invalid={bodyBad}
             />
+            {bodyBad && (
+              <p role="alert" className="text-sm text-destructive">
+                The note is {bodyLength} characters as Markdown (formatting marks count), over the limit of{" "}
+                {NOTE_BODY_MAX}. Shorten it to save; nothing is cut automatically.
+              </p>
+            )}
             <div className="flex items-center justify-between gap-3">
               <p className="text-xs text-muted-foreground">
                 {saved ? `Last saved: ${saved}` : ""}
@@ -219,15 +223,17 @@ export function NoteEditor(props: NoteEditorProps) {
 
 function FieldLabel({
   htmlFor,
+  id,
   required,
   children,
 }: {
   htmlFor: string;
+  id?: string;
   required?: boolean;
   children: string;
 }) {
   return (
-    <Label htmlFor={htmlFor} className="text-[15px] font-semibold">
+    <Label id={id} htmlFor={htmlFor} className="text-[15px] font-semibold">
       {children}
       {required && (
         <span aria-hidden="true" className="ml-1 text-destructive">
