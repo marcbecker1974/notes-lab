@@ -19,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { createSessionLossGate } from "@/lib/auth/session-loss";
 import { NotesDbError, type Collection, type Note } from "@/lib/notes-db";
 import { filterNotes, type View } from "@/lib/notes-view";
+import { downloadNoteAsMarkdown } from "./download-markdown";
 import { NoteEditor, type Draft } from "./note-editor";
 import { NotesList } from "./notes-list";
 import { SidebarPanel } from "./sidebar-panel";
@@ -347,6 +348,7 @@ export function NotesApp() {
                 selectedNote && void act(() => data.removeTag(selectedNote.id, tagId))
               }
               onChangeTagColor={(id, color) => void act(() => data.changeTagColor(id, color))}
+              onExport={() => selectedNote && downloadNoteAsMarkdown(selectedNote)}
               onDelete={() => selectedNote && setPending({ kind: "delete-note", note: selectedNote })}
             />
           </div>

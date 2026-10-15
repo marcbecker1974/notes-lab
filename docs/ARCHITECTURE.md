@@ -317,9 +317,11 @@ The plan written on 2026-10-15 was carried out the same day; section 4b is the d
 - **Safe rendering.** User-generated content must not execute HTML or script; the approach (sanitising, or rendering from a structured document) is part of the library and format decision.
 - **Mobile.** The editor is unreachable below 768px (see section 2); whether the fix is part of this feature is an open scope decision.
 
-### 9.3 Feature 9: Markdown export
+### 9.3 Feature 9: Markdown export (implemented; PR pending merge)
 
-- Export the **selected note** as a `.md` file generated for the signed-in user from the note data the user can already read (so existing RLS limits what can be exported). The conversion depends on the Feature 8 storage format; before that format exists only plain-text notes can be exported. Image references need a defined representation (Feature 10). Feature 9 uses Workflow B: normal feature planning and approval; it reads only note data the user can already read, so it does not automatically need the security assessment of a database or Storage change.
+- **Implemented design (2026-10-15, owner-approved).** The editor's Export button downloads the **last saved version** of the selected note as a `.md` file (unsaved editor changes are not exported; the editor says so while changes are unsaved). The file is the title as an H1 followed by the body unchanged, with `\r\n` normalised to `\n`; no collection, tags or other metadata. The conversion is the pure module `lib/note-markdown.ts` (`noteToMarkdown`, `markdownFilename`: a readable file name with unsafe characters removed, Unicode kept, at most 200 UTF-8 bytes, Windows reserved names prefixed, fallback `note.md`). `components/notes/download-markdown.ts` triggers the native browser download (`Blob`, `URL.createObjectURL`, `<a download>`).
+- **Security and data.** It reads no new data and makes no request: it uses the note already loaded in the browser, which RLS limits to the signed-in user's own rows. No database, Supabase, Auth, RLS or `lib/notes-db.ts` change. Workflow B.
+- **Compatibility with Feature 8 (to revisit).** The body is exported as-is, which is correct only while it is plain text. If Feature 8 changes the note content format, the conversion in `lib/note-markdown.ts` must be revisited (OPT-1.2). Image references need a defined representation (Feature 10).
 
 ### 9.4 Feature 10: image uploads with Supabase Storage
 

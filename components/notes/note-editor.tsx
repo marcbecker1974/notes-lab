@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, type FocusEvent, type FormEvent, type KeyboardEvent } from "react";
-import { Folder, Trash2, X } from "lucide-react";
+import { Download, Folder, Trash2, X } from "lucide-react";
 
 import { Badge, badgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,8 @@ type NoteEditorProps = {
   onAddTag: (name: string) => Promise<string | null>;
   onRemoveTag: (tagId: number) => void;
   onChangeTagColor: (id: number, color: PaletteKey) => void;
+  /** Downloads the last saved version of the note as a Markdown file. */
+  onExport: () => void;
   onDelete: () => void;
 };
 
@@ -91,9 +93,22 @@ export function NoteEditor(props: NoteEditorProps) {
           )}
           aria-live="polite"
         >
-          {props.dirty ? "Unsaved changes" : "All changes saved"}
+          {props.dirty ? "Unsaved changes. Export uses the last saved version." : "All changes saved"}
         </p>
         <div className="flex shrink-0 gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={props.onExport}
+            aria-label="Export note as Markdown"
+            title={
+              props.dirty
+                ? "Export the last saved version as Markdown (unsaved changes are not included)"
+                : "Export note as Markdown"
+            }
+          >
+            <Download />
+          </Button>
           <Button
             variant="ghost"
             size="icon"
