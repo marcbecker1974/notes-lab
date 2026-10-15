@@ -3,6 +3,7 @@
 // export compatibility and static checks. Browser behaviour (toolbar clicks, source
 // and fullscreen switching) is verified manually; see REFLECTION.md.
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import type { JSONContent } from "@tiptap/react";
 import {
@@ -15,7 +16,7 @@ import {
 } from "../lib/rich-text/markdown.ts";
 import { plainTextPreview, unescapeMarkdown } from "../lib/rich-text/preview.ts";
 import { matchesQuery } from "../lib/notes-view.ts";
-import { markdownFilename, noteToMarkdown } from "../lib/note-markdown.ts";
+import { markdownFilename, noteToMarkdown, splitFrontMatter } from "../lib/note-markdown.ts";
 
 const read = (path: string) => readFileSync(path, "utf8");
 let failed = 0;
@@ -354,6 +355,86 @@ test("export of front matter notes is idempotent in content and does not change 
   assert.equal(body, copy);
   // The body of the exported file still starts the same front matter block.
   assert.ok(hasFrontMatter(noteToMarkdown({ title: "T", body })));
+});
+// --- Front matter detection is linear (independent PR #10 review, ReDoS) -----------------
+// The earlier single regex backtracked exponentially when the closing line was missing
+// (16 unclosed `k: v` lines took more than 10 s). The pathological inputs run in a
+// separate process with an enforced timeout, so a regression cannot hang the test run.
+type Probe = {
+  ms: number;
+  detected: boolean;
+  safe: boolean;
+  frontLines: number;
+  restStart: string | null;
+  exportStartsWithRule: boolean;
+  exportEndsWithTitleAndBody: boolean;
+  exportTitleOnly: boolean;
+};
+function probe(mode: "new" | "old", name: string, n: number, timeoutMs: number) {
+  const run = spawnSync(
+    process.execPath,
+    ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", "scripts/front-matter-probe.mts", mode, name, String(n)],
+    { encoding: "utf8", timeout: timeoutMs, killSignal: "SIGKILL" },
+  );
+  const killed = run.error !== undefined || run.signal !== null;
+  return { killed, result: killed ? null : (JSON.parse(run.stdout.trim().split("\n").pop() ?? "{}") as Probe) };
+}
+const PROBE_TIMEOUT = 20_000;
+const fast = (name: string, n: number) => {
+  const { killed, result } = probe("new", name, n, PROBE_TIMEOUT);
+  assert.ok(!killed && result, `${name} ${n} did not finish in ${PROBE_TIMEOUT} ms`);
+  assert.ok(result.ms < 2000, `${name} ${n} took ${Math.round(result.ms)} ms`);
+  return result;
+};
+test("control: the old regex really hangs on the demonstrated input (killed by the timeout)", () => {
+  assert.equal(probe("old", "unclosed", 24, 2000).killed, true);
+});
+test("unclosed or malformed blocks of thousands of lines finish promptly and are not front matter", () => {
+  for (const [name, n] of [["unclosed", 16], ["unclosed", 5000], ["unclosedCrlf", 5000], ["longLine", 200000], ["longKeyLine", 200000], ["malformed", 5000]] as const) {
+    const r = fast(name, n);
+    assert.equal(r.detected, false, `${name} ${n}`);
+    assert.equal(r.frontLines, 0);
+    assert.equal(r.exportStartsWithRule, false);
+    assert.equal(r.exportTitleOnly, true);
+  }
+});
+test("detection time does not grow exponentially with the unclosed block", () => {
+  const times = [1000, 2000, 4000, 8000, 16000].map((n) => fast("unclosed", n).ms);
+  // 16x the lines must stay near-linear, nowhere near the exponential cost (each also under 2 s).
+  assert.ok(times[4] < Math.max(times[0], 5) * 200, JSON.stringify(times));
+});
+test("large valid front matter (LF, and CRLF with a BOM, closed by --- or ...) is detected and exported first", () => {
+  for (const name of ["validLf", "validCrlfBom"]) {
+    const r = fast(name, 5000);
+    assert.equal(r.detected, true, name);
+    assert.equal(r.safe, false, name);
+    assert.equal(r.frontLines, 5003, name);
+    assert.equal(r.restStart, "body", name);
+    assert.equal(r.exportStartsWithRule, true, name);
+    assert.equal(r.exportEndsWithTitleAndBody, true, name);
+  }
+});
+test("thousands of horizontal rules are not front matter and stay safe for the visual editor", () => {
+  for (const name of ["rules", "manyRules"]) {
+    const r = fast(name, 5000);
+    assert.equal(r.detected, false, name);
+    assert.equal(r.exportStartsWithRule, false, name); // not front matter: the title heading comes first
+    assert.equal(r.exportTitleOnly, true, name);
+  }
+});
+test("scanner: delimiters, line endings, BOM and the key requirement", () => {
+  const split = (body: string) => splitFrontMatter(body);
+  assert.deepEqual(split("---\na: 1\n---\nrest"), { front: "---\na: 1\n---\n", rest: "rest" });
+  assert.deepEqual(split("---\na: 1\n...\nrest"), { front: "---\na: 1\n...\n", rest: "rest" });
+  assert.deepEqual(split("---\r\na: 1\r\n---\r\nrest"), { front: "---\r\na: 1\r\n---\r\n", rest: "rest" });
+  assert.deepEqual(split("﻿---\na: 1\n---"), { front: "---\na: 1\n---", rest: "" });
+  assert.deepEqual(split("--- \na: 1\n ---  \nrest"), { front: "--- \na: 1\n ---  \n", rest: "rest" });
+  assert.deepEqual(split("---\na: 1\n\n  b: 2\n# c\n- d\n---\nx"), { front: "---\na: 1\n\n  b: 2\n# c\n- d\n---\n", rest: "x" });
+  // The first closing line ends the block.
+  assert.deepEqual(split("---\na: 1\n---\nb: 2\n---\n"), { front: "---\na: 1\n---\n", rest: "b: 2\n---\n" });
+  for (const bad of ["", "---", "---\n", "---\na: 1", "---\n---", "---\n- x\n---", "---\n# c\n---", "---\nprose\n---", "x\n---\na: 1\n---", " ---\na: 1\n---", "----\na: 1\n----", "---x\na: 1\n---"]) {
+    assert.equal(split(bad), null, JSON.stringify(bad));
+  }
 });
 test("export works on the saved note only, never on the editor draft", () => {
   const app = read("components/notes/notes-app.tsx");
