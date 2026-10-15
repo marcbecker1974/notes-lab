@@ -15,6 +15,15 @@ import {
 } from "../lib/auth/latest.ts";
 import { readFileSync } from "node:fs";
 import {
+  LOGIN_PATH,
+  hasVerifiedUser,
+  isPublicPath,
+} from "../lib/auth/protected-routes.ts";
+import {
+  createSessionLossGate,
+  isSessionLossKind,
+} from "../lib/auth/session-loss.ts";
+import {
   PASSWORD_UPDATE_PATH,
   confirmRedirectPath,
   safeRedirectPath,
@@ -396,6 +405,222 @@ await test("/auth/confirm routes its destination through confirmRedirectPath", (
   assert.ok(
     code.includes("confirmRedirectPath") && !code.includes("/protected"),
   );
+});
+
+// --- Sprint 2 M1: server-side protection of /notes ----------------------
+for (const path of [
+  "/",
+  "/auth",
+  "/auth/login",
+  "/auth/sign-up",
+  "/auth/sign-up-success",
+  "/auth/forgot-password",
+  "/auth/update-password",
+  "/auth/callback",
+  "/auth/confirm",
+  "/auth/error",
+  "/login",
+  "/login/anything",
+]) {
+  await test(`public path: ${path}`, () =>
+    assert.equal(isPublicPath(path), true));
+}
+for (const path of [
+  "/notes",
+  "/notes/",
+  "/notes/anything",
+  "/notes?x=1",
+  "/protected",
+  "/protected/x",
+  "/authors", // starts with /auth but is not under /auth/
+  "/auth-notes",
+  "/login-x",
+  "/api/anything",
+  "//notes",
+  "//auth/login",
+  "/Notes",
+  "",
+  "notes",
+]) {
+  await test(`protected path: ${JSON.stringify(path)}`, () =>
+    assert.equal(isPublicPath(path), false));
+}
+await test("/notes is protected and is the post-login destination", () => {
+  assert.equal(POST_LOGIN_PATH, "/notes");
+  assert.equal(isPublicPath(POST_LOGIN_PATH), false);
+  assert.equal(LOGIN_PATH, "/auth/login");
+  assert.equal(isPublicPath(LOGIN_PATH), true);
+});
+await test("a public prefix cannot be used to reach /notes (dot-segments, encodings)", () => {
+  for (const path of [
+    "/auth/../notes",
+    "/auth/./../notes",
+    "/auth/..%2fnotes",
+    "/auth/..%2Fnotes",
+    "/auth/%2e%2e/notes",
+    "/auth/%2E%2E%2Fnotes",
+    "/auth/..%5cnotes",
+    "/auth/..\\notes",
+    "/auth/login%2f..%2f..%2fnotes",
+    "/auth/\u0000notes",
+    "/login/../notes",
+  ]) {
+    assert.equal(isPublicPath(path), false, path);
+  }
+  // The normalised form a URL parser produces is protected too.
+  assert.equal(isPublicPath(new URL("/auth/../notes", ORIGIN).pathname), false);
+});
+await test("hasVerifiedUser accepts only real signed-in claims", () => {
+  assert.equal(
+    hasVerifiedUser({ sub: "921d5ba0-e423-473d-a013-0934e626dc49" }),
+    true,
+  );
+  assert.equal(
+    hasVerifiedUser({ sub: "u1", role: "authenticated", is_anonymous: false }),
+    true,
+  );
+  for (const bad of [
+    null,
+    undefined,
+    {},
+    { sub: "" },
+    { sub: 42 },
+    { sub: null },
+    { sub: "u1", is_anonymous: true },
+    "sub",
+    [],
+    { role: "anon" },
+  ]) {
+    assert.equal(hasVerifiedUser(bad), false, JSON.stringify(bad));
+  }
+});
+await test("the proxy uses the shared decision and has no /notes exemption", () => {
+  const code = src("lib/supabase/proxy.ts");
+  assert.ok(
+    code.includes("isPublicPath(") && code.includes("hasVerifiedUser("),
+  );
+  assert.ok(code.includes("LOGIN_PATH"));
+  assert.ok(!code.includes('"/notes"'), "the proxy must not mention /notes");
+  assert.ok(!code.includes('startsWith("/auth")'), "no loose prefix check");
+  // A redirect keeps the session cookie changes (for example a cleared expired session).
+  assert.ok(code.includes("redirectResponse.cookies.set"));
+});
+await test("/notes verifies the user on the server before rendering the UI", () => {
+  const page = src("app/notes/page.tsx");
+  assert.ok(page.includes('from "@/lib/auth/require-user"'));
+  assert.ok(
+    page.includes("<Suspense"),
+    "cacheComponents: runtime data needs Suspense",
+  );
+  const check = page.indexOf("await requireUser()");
+  const ui = page.indexOf("<NotesApp />");
+  assert.ok(
+    check > -1 && ui > check,
+    "requireUser() must run before <NotesApp />",
+  );
+  assert.ok(
+    !page.includes('"use client"'),
+    "the page must stay a Server Component",
+  );
+});
+await test("requireUser verifies claims on the server and redirects to the sign-in page", () => {
+  const code = src("lib/auth/require-user.ts");
+  assert.ok(code.includes('import "server-only"'));
+  assert.ok(code.includes("getClaims()"));
+  assert.ok(
+    code.includes("hasVerifiedUser(") && code.includes("redirect(LOGIN_PATH)"),
+  );
+  assert.ok(
+    !code.includes("getSession"),
+    "getSession() is not verified on the server",
+  );
+  assert.ok(
+    !code.includes("try {"),
+    "redirect() throws; it must not sit inside try/catch",
+  );
+});
+await test("browser-side session state is not what protects /notes", () => {
+  // The only browser-side session read in the notes UI is the display-only status.
+  for (const f of [
+    "components/notes/notes-app.tsx",
+    "components/notes/use-notes-data.ts",
+    "app/notes/page.tsx",
+  ]) {
+    const code = src(f);
+    assert.ok(
+      !code.includes("auth.getSession") && !code.includes("auth.getUser"),
+      f,
+    );
+  }
+});
+await test("login, Google callback and password forms still end on /notes", () => {
+  for (const f of [
+    "components/login-form.tsx",
+    "components/update-password-form.tsx",
+    "app/auth/confirm/route.ts",
+  ]) {
+    assert.ok(src(f).includes("POST_LOGIN_PATH"), f);
+  }
+  assert.ok(
+    src("lib/auth/oauth-callback.ts").includes('POST_LOGIN_PATH = "/notes"'),
+  );
+});
+
+// --- Sprint 2 M1: session loss ---------------------------------------------
+await test("only a refused request counts as a lost session", () => {
+  assert.equal(isSessionLossKind("forbidden"), true);
+  for (const kind of [
+    "not_found",
+    "duplicate",
+    "invalid",
+    "unknown",
+    "",
+    null,
+    undefined,
+  ]) {
+    assert.equal(
+      isSessionLossKind(kind as string | null | undefined),
+      false,
+      String(kind),
+    );
+  }
+});
+await test("session-loss gate refreshes once, then only after a reset", () => {
+  let refreshes = 0;
+  const gate = createSessionLossGate(() => {
+    refreshes++;
+  });
+  assert.equal(gate.onError("unknown"), false);
+  assert.equal(gate.onError(null), false);
+  assert.equal(refreshes, 0);
+  assert.equal(gate.onError("forbidden"), true);
+  assert.equal(
+    gate.onError("forbidden"),
+    false,
+    "no refresh loop for a persistent error",
+  );
+  assert.equal(refreshes, 1);
+  gate.reset(); // a request succeeded: the session works again
+  assert.equal(gate.onError("forbidden"), true);
+  assert.equal(refreshes, 2);
+});
+await test("the notes UI re-checks the session on a refused request", () => {
+  const app = src("components/notes/notes-app.tsx");
+  assert.ok(
+    app.includes("createSessionLossGate") && app.includes("router.refresh()"),
+  );
+  assert.ok(app.includes("sessionLoss.onError(e.kind)"));
+  assert.ok(app.includes("sessionLoss.onError(data.loadErrorKind)"));
+  assert.ok(
+    src("components/notes/use-notes-data.ts").includes("loadErrorKind"),
+  );
+});
+await test("rejected or expired JWT errors map to the refused-request kind", () => {
+  const code = src("lib/notes-db.ts");
+  for (const c of ["42501", "PGRST301", "PGRST302", "PGRST303"]) {
+    assert.ok(code.includes(`case "${c}":`), c);
+  }
+  assert.ok(!code.includes("user_id:"), "notes-db still never writes user_id");
 });
 
 if (failed) {

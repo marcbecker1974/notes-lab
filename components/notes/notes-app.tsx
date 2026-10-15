@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { createSessionLossGate } from "@/lib/auth/session-loss";
 import { NotesDbError, type Collection, type Note } from "@/lib/notes-db";
 import { filterNotes, type View } from "@/lib/notes-view";
 import { DemoBanner } from "./demo-banner";
@@ -34,6 +36,14 @@ const errorMessage = (error: unknown) =>
 
 export function NotesApp() {
   const data = useNotesData();
+  const router = useRouter();
+  // When the database refuses a request because the session is gone, ask the server to
+  // re-check: the server-side check on /notes then redirects to the sign-in page.
+  const sessionLoss = useMemo(() => createSessionLossGate(() => router.refresh()), [router]);
+  useEffect(() => {
+    if (data.status === "error") sessionLoss.onError(data.loadErrorKind);
+    else if (data.status === "ready") sessionLoss.reset();
+  }, [data.status, data.loadErrorKind, sessionLoss]);
   const { notes, collections, tags } = data;
 
   const [viewState, setView] = useState<View>({ kind: "all" });
@@ -84,8 +94,10 @@ export function NotesApp() {
     async (action: () => Promise<unknown>): Promise<string | null> => {
       try {
         await action();
+        sessionLoss.reset();
         return null;
       } catch (e) {
+        if (e instanceof NotesDbError) sessionLoss.onError(e.kind);
         if (e instanceof NotesDbError && e.kind === "not_found") {
           // A row vanished: re-sync, and say so in the page-level alert, because
           // an inline form message would disappear together with the removed note.
@@ -95,7 +107,7 @@ export function NotesApp() {
         return errorMessage(e);
       }
     },
-    [data],
+    [data, sessionLoss],
   );
 
   const act = useCallback(
