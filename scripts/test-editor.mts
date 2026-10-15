@@ -7,6 +7,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import type { JSONContent } from "@tiptap/react";
 import {
   checkVisualSafety,
+  hasFrontMatter,
   isAllowedLinkUri,
   normalizeLinkInput,
   parseMarkdown,
@@ -263,6 +264,68 @@ test("export of a formatted note round-trips through the editor unchanged", () =
   assert.equal(roundTrip(noteToMarkdown({ title: "T", body }).replace(/^# T\n\n/, "").trimEnd()), body);
 });
 test("export file names stay safe", () => {
+  assert.equal(markdownFilename('a/b:c*"d'), "a-b-c--d.md");
+});
+
+// --- YAML front matter (independent PR review, 2026-10-15) ----------------------------
+const FM_ONE = "---\ntitle: Weekly notes\n---\n\nBody text about kubernetes.";
+const FM_MANY =
+  "---\ntitle: \"Plan: Q4\"\ndate: 2026-10-15\ntags:\n  - ai\n  - journal\n# a comment\ndraft: false\n---\n## Heading\n\n- item";
+test("valid YAML front matter is detected and sends the note to source mode", () => {
+  for (const md of [FM_ONE, FM_MANY, FM_ONE.replace(/\n/g, "\r\n"), "\uFEFF" + FM_ONE, "---\ntitle: x\n...\ntext", "---\ntitle: x\n---"]) {
+    assert.ok(hasFrontMatter(md), JSON.stringify(md));
+    const result = checkVisualSafety(md);
+    assert.equal(result.safe, false);
+    if (!result.safe) assert.ok(result.reasons.includes("YAML front matter"));
+  }
+});
+test("the unprotected conversion really would change front matter (why the guard exists)", () => {
+  assert.notEqual(roundTrip(FM_ONE), FM_ONE);
+});
+test("ordinary horizontal rules are not front matter", () => {
+  for (const md of ["---\n\nparagraph", "text\n\n---\n\nmore", "---\nsome prose line\n---\nafter", "---\n---", "a\n---\nb: c\n---", "***\ntitle: x\n***", "----\ntitle: x\n----"]) {
+    assert.equal(hasFrontMatter(md), false, JSON.stringify(md));
+  }
+  assert.deepEqual(checkVisualSafety("# T\n\ntext\n\n---\n\nmore"), { safe: true });
+  assert.deepEqual(checkVisualSafety("---\n\nparagraph"), { safe: true });
+});
+test("a front matter marker later in the note is not front matter", () => {
+  assert.equal(hasFrontMatter("intro\n\n---\ntitle: x\n---\n"), false);
+});
+test("opening, checking and cancelling never change the stored Markdown", () => {
+  const stored = FM_MANY;
+  const copy = `${stored}`;
+  checkVisualSafety(stored);
+  assert.equal(stored, copy);
+  // The editor opens an unsafe note in source mode, and only reports user edits.
+  const component = read("components/notes/rich-text-editor.tsx");
+  assert.ok(component.includes('initial.safe ? "visual" : "source"'));
+  assert.ok(component.includes("!transaction.docChanged"));
+  assert.ok(component.includes("emitUpdate: false"));
+  // Switching to visual is refused while the guard says unsafe.
+  assert.ok(/const check = checkVisualSafety\(value\);\s+if \(!check\.safe\) \{/.test(component));
+});
+test("removing the front matter in source mode makes the note safe for visual mode again", () => {
+  assert.equal(checkVisualSafety(FM_ONE.replace(/^---\n.*\n---\n\n/, "")).safe, true);
+});
+test("search finds front matter keys, values and body", () => {
+  const note = { title: "T", body: FM_MANY } as Parameters<typeof matchesQuery>[0];
+  for (const q of ["date: 2026-10-15", "journal", "Q4", "item", "draft"]) assert.ok(matchesQuery(note, q), q);
+  assert.ok(!matchesQuery(note, "absent"));
+});
+test("export keeps the saved body with its complete front matter, byte for byte", () => {
+  for (const body of [FM_ONE, FM_MANY]) {
+    assert.equal(noteToMarkdown({ title: "T", body }), `# T\n\n${body}\n`);
+  }
+});
+test("export works on the saved note only, never on the editor draft", () => {
+  const app = read("components/notes/notes-app.tsx");
+  assert.ok(app.includes("onExport={() => selectedNote && downloadNoteAsMarkdown(selectedNote)}"));
+  assert.ok(!/downloadNoteAsMarkdown\([^)]*draft/i.test(app));
+  assert.ok(!/noteToMarkdown|downloadNoteAsMarkdown/.test(read("components/notes/rich-text-editor.tsx")));
+  assert.ok(!/noteToMarkdown|downloadNoteAsMarkdown/.test(read("components/notes/note-editor.tsx")));
+});
+test("export file name safety is unchanged by front matter notes", () => {
   assert.equal(markdownFilename('a/b:c*"d'), "a-b-c--d.md");
 });
 

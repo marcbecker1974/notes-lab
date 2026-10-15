@@ -159,6 +159,21 @@ function docParts(doc: JSONContent) {
   return { links, code };
 }
 
+// YAML front matter: a first line `---`, then only `key: value`, list, indented or
+// comment lines, closed by `---` or `...`. The editor would turn it into a rule and a
+// heading (`## title: x`), so such a note stays in source mode. A rule, some prose and
+// another rule is not front matter (a prose line is not a YAML line).
+const FRONT_MATTER = /^\uFEFF?---[ \t]*\r?\n((?:(?![ \t]*(?:---|\.\.\.)[ \t]*$)[^\n]*\n?)*?)[ \t]*(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;
+const YAML_LINE = /^(?:[ \t]*$|[ \t]*#|[ \t]+\S|[ \t]*-(?:[ \t]|$)|[^\s:#][^:\n]*:(?:[ \t]|$))/;
+
+/** True when the Markdown starts with a YAML front matter block. */
+export function hasFrontMatter(source: string): boolean {
+  const match = FRONT_MATTER.exec(source);
+  if (!match) return false;
+  const lines = match[1].split(/\r?\n/).filter((line) => line.trim() !== "");
+  return lines.length > 0 && lines.every((line) => YAML_LINE.test(line)) && lines.some((line) => /^[^\s#-][^:\n]*:/.test(line));
+}
+
 /**
  * Can the visual editor show this Markdown and write it back without losing content?
  * Unsafe notes open in source mode, where the raw text is edited and saved as is.
@@ -168,6 +183,7 @@ function docParts(doc: JSONContent) {
  */
 export function checkVisualSafety(source: string): VisualCheck {
   const reasons = new Set<string>();
+  if (hasFrontMatter(source)) reasons.add("YAML front matter");
   try {
     const m = markdown();
     const tokens = m.instance.lexer(source) as unknown as Token[];
