@@ -63,13 +63,24 @@ export function withAllTags(notes: Note[], tagIds: number[]): Note[] {
   return notes.filter((note) => tagIds.every((id) => note.tagIds.includes(id)));
 }
 
+// The editor stores the body as Markdown and escapes characters (`snake\_case`,
+// `5 &lt; 6`); search also looks at the body as the user sees it. Inline so this
+// module stays free of runtime imports.
+const unescaped = (body: string) =>
+  body
+    .replace(/\\([\\`*_{}[\]()#+\-.!~<>|&$:"'/^=%@;,?])/g, "$1")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+
 /** Case-insensitive match on title or body (R11). */
 export function matchesQuery(note: Note, query: string): boolean {
   const needle = query.trim().toLowerCase();
   if (needle === "") return true;
   return (
     note.title.toLowerCase().includes(needle) ||
-    note.body.toLowerCase().includes(needle)
+    note.body.toLowerCase().includes(needle) ||
+    unescaped(note.body).toLowerCase().includes(needle)
   );
 }
 

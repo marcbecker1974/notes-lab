@@ -943,6 +943,12 @@ await test("export: Markdown the user typed is not escaped or altered", () => {
   assert.ok(noteToMarkdown({ title: "T", body }).includes(`\n\n${body}\n`));
 });
 
+await test("export: rich-text (Feature 8) Markdown is exported as saved, underline stays <u>…</u>", () => {
+  const body =
+    "## Part\n\n**bold** *italic* <u>under</u> <u>**both**</u> [link](https://a.b)\n\n- a\n\n1. b\n\n> quote\n\n```js\nlet a = 1;\n```\n\n~~old~~\n\n---";
+  assert.equal(noteToMarkdown({ title: "T", body }), `# T\n\n${body}\n`);
+});
+
 await test("export: Unicode and line breaks are preserved, CRLF becomes LF", () => {
   const out = noteToMarkdown({ title: "Größe – 日本語 🚀", body: "ä ö ü ß\r\nzweite Zeile\rdritte\n\nvierte" });
   assert.equal(out, "# Größe – 日本語 🚀\n\nä ö ü ß\nzweite Zeile\ndritte\n\nvierte\n");

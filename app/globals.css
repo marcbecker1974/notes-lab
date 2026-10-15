@@ -68,3 +68,56 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Visual note editor (Feature 8): the content of the Tiptap editor. */
+@layer components {
+  .rich-text {
+    @apply min-h-[420px] px-6 py-4 text-[17px] leading-[1.5] outline-none;
+    white-space: pre-wrap; /* keeps the line breaks of existing plain-text notes */
+    overflow-wrap: anywhere;
+  }
+  .rich-text > * + * {
+    @apply mt-3;
+  }
+  .rich-text h1 {
+    @apply text-3xl font-bold leading-tight;
+  }
+  .rich-text h2 {
+    @apply text-2xl font-semibold leading-tight;
+  }
+  .rich-text h3 {
+    @apply text-xl font-semibold leading-snug;
+  }
+  .rich-text h4,
+  .rich-text h5,
+  .rich-text h6 {
+    @apply text-lg font-semibold;
+  }
+  .rich-text ul {
+    @apply list-disc pl-6;
+  }
+  .rich-text ol {
+    @apply list-decimal pl-6;
+  }
+  .rich-text li > * + * {
+    @apply mt-1;
+  }
+  .rich-text a {
+    @apply cursor-pointer text-primary underline underline-offset-2;
+  }
+  .rich-text blockquote {
+    @apply border-l-4 border-border pl-4 text-muted-foreground;
+  }
+  .rich-text code {
+    @apply rounded bg-muted px-1 py-0.5 font-mono text-[0.9em];
+  }
+  .rich-text pre {
+    @apply overflow-x-auto rounded-md bg-muted p-3 font-mono text-sm;
+  }
+  .rich-text pre code {
+    @apply bg-transparent p-0;
+  }
+  .rich-text hr {
+    @apply my-4 border-border;
+  }
+}

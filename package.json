@@ -6,6 +6,7 @@
     "start": "next start -H 127.0.0.1",
     "lint": "eslint .",
     "test:auth": "node scripts/test-auth.mts",
+    "test:editor": "node scripts/test-editor.mts",
     "test:rls": "node scripts/test-rls.mts"
   },
   "dependencies": {
@@ -20,6 +21,11 @@
     "@radix-ui/react-slot": "^1.2.2",
     "@supabase/ssr": "latest",
     "@supabase/supabase-js": "latest",
+    "@tiptap/extension-underline": "^3.32.0",
+    "@tiptap/markdown": "^3.32.0",
+    "@tiptap/pm": "^3.32.0",
+    "@tiptap/react": "^3.32.0",
+    "@tiptap/starter-kit": "^3.32.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.511.0",
