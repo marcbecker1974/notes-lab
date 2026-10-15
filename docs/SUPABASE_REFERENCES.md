@@ -181,8 +181,9 @@ using ( true );
 - A secret (`service_role`) key bypasses RLS. Keep it server-side and out of the browser.
 
 Notes Lab:
-- The temporary anonymous-access migration starts with `revoke all` on the four tables (removing the default `TRUNCATE`, `REFERENCES`, `TRIGGER`, `MAINTAIN`), grants only `select, insert, update, delete`, and creates one `TEMP anon <operation> <table>` policy per operation, each naming `to anon, authenticated`.
-- The future owner policies use `(select auth.uid()) = user_id` (see ARCHITECTURE.md, section 6).
+- *Historical (Mid-Sprint):* the temporary anonymous-access migration started with `revoke all` on the four tables (removing the default `TRUNCATE`, `REFERENCES`, `TRIGGER`, `MAINTAIN`), granted only `select, insert, update, delete`, and created one `TEMP anon <operation> <table>` policy per operation, each naming `to anon, authenticated`. Feature 7 dropped those policies and the grants.
+- **Feature 7:** the owner policies use `(select auth.uid()) = user_id`, one per operation, `to authenticated` (see ARCHITECTURE.md, section 4b). Behaviours relied on, each confirmed by the two-account tests (`REFLECTION.md`) rather than assumed from this page alone: an `update` needs a `select` policy as well; foreign-key checks bypass RLS, so a policy must check that referenced rows belong to the caller; column-level `grant insert (…)` / `grant update (…)` keeps columns such as `user_id` out of clients' reach; an attempt to write a `generated always` identity column fails with SQLSTATE `428C9`, not `42501`.
+- Session checks on the server use `supabase.auth.getClaims()` (`lib/auth/require-user.ts`, `lib/supabase/proxy.ts`), as in the Supabase Next.js starter and the installed `@supabase/ssr` 0.12.7. Anonymous sign-ins carry the `authenticated` role, so the app also rejects claims with `is_anonymous`. Source to re-check if this looks out of date: https://supabase.com/docs/guides/auth/server-side/nextjs
 - No secret key is used anywhere in the project.
 
 ## 7. Error handling (PostgREST)

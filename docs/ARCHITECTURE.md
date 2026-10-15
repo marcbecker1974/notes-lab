@@ -1,8 +1,8 @@
 # Architecture: Notes Lab MVP
 
-Status (corrected 2026-10-15): **implemented and merged to `main` (PRs #1 to #6): database schema with colours, temporary anonymous access policies, `lib/notes-db.ts`, the three-column notes UI with count badges and colours, Google and email/password sign-in, post-login navigation to `/notes` and the display-only sign-in status.** `/notes` is still open to anonymous visitors and the data is not per user. The earlier status line ("the notes UI is on `feature/notes-ui` until its PR is merged", 2026-10-13) was out of date. `REFLECTION.md` records what was verified.
+Status (2026-10-15): the Mid-Sprint MVP is **implemented and merged to `main`** (PRs #1 to #6): schema with colours, `lib/notes-db.ts`, the three-column notes UI with count badges and colours, Google and email/password sign-in, post-login navigation and the display-only sign-in status. **Feature 7 (server-side route protection, per-user ownership, secure RLS) is implemented and verified on `feature/user-data-isolation-rls` and is not merged yet**; it is described in **section 4b** and supersedes the anonymous-access design of section 5. `REFLECTION.md` records what was verified and how.
 
-**Active scope: Turing Sprint 2** ([PROJECT_BRIEF.md](./PROJECT_BRIEF.md) Part A). Sections 1 to 8 below describe the architecture **as implemented** (the Mid-Sprint design plus Features 5 and 6). Work required by Sprint 2 (server-side protection of `/notes`, per-user ownership and RLS, rich-text editor, Markdown export, image uploads) is **not implemented**; it is described separately, as planned, in section 9 and must not be read as current behaviour.
+**Active scope: Turing Sprint 2** ([PROJECT_BRIEF.md](./PROJECT_BRIEF.md) Part A). How to read this document: sections 1 to 4a and 6 to 8 describe the Mid-Sprint design (with dated notes where Feature 7 changed it); **section 4b is the current security architecture**; **section 5 is historical** (the temporary anonymous access, no longer in the database); section 9 holds the Sprint 2 features that are **not implemented** (Features 8 to 10) and must not be read as current behaviour.
 
 Related: [PROJECT_BRIEF.md](./PROJECT_BRIEF.md)
 
@@ -10,7 +10,7 @@ Related: [PROJECT_BRIEF.md](./PROJECT_BRIEF.md)
 
 - **Simplest thing that works:** reuse the existing Next.js project and Supabase configuration; add no new services. *[Dated note 2026-10-15: this describes the implemented Mid-Sprint architecture. For Sprint 2, Supabase Storage is planned for Feature 10 (section 9.4); it is not implemented.]*
 - **Client-side data layer:** data is loaded once; collection selection, AND tag filtering and live search run in memory.
-- **Notes are not user-protected, but auth-ready:** anonymous access lives only in temporary database policies. The schema and the notes code do not depend on it. Sign-in (Google and email/password) exists separately from notes (section 4a).
+- **Notes are private per user (Feature 7, section 4b):** `/notes` needs a verified user and the database allows each account to reach only its own rows. *[Mid-Sprint wording, now superseded: "notes are not user-protected, but auth-ready; anonymous access lives only in temporary policies".]* The notes code stays auth-free; the database does the work.
 - **One data-access point:** all database access goes through `lib/notes-db.ts`.
 
 ## 2. System components and data flow
@@ -83,17 +83,17 @@ tags (id, name, color, user_id)        collections (… color …) likewise
 - A note belongs to at most one collection; `collection_id` null means uncategorised.
 - Notes and tags are many-to-many through `note_tags`.
 - **AND filter:** a note matches when it has every selected tag (`selected.every(id => note.tagIds.includes(id))`).
-- **Existing:** `public.notes(id, title, body, created_at)`. Its content column stays `body`. It needs `collection_id` and `updated_at` added, plus `user_id`. *[Status corrected 2026-10-15: these columns were added by the applied migrations of PR #1; `user_id` is still nullable.]*
+- **Existing:** `public.notes(id, title, body, created_at)`. Its content column stays `body`. It needs `collection_id` and `updated_at` added, plus `user_id`. *[Status corrected 2026-10-15: these columns were added by the applied migrations of PR #1; `user_id` was nullable until Feature 7 made it `not null` (section 4b).]*
 - **Colours (Feature 4):** `collections.color` and `tags.color` are `text not null default 'slate'` with a CHECK against eight palette keys (`slate, red, amber, green, teal, blue, violet, pink`). The database stores the key, never a hex value. Migration `add_palette_colors` replaced the earlier hex check on `tags.color`, added the collections column and gave existing rows distinct colours (collections blue, green, amber; tags violet, teal, pink, red, by id). No grants or policies changed: the existing temporary update policies cover the new column. `lib/palette.ts` maps each key to full Tailwind class strings (soft 100/800 badge, 500 dot, 600 folder, dark variants) and picks the least-used colour for new items; `lib/notes-db.ts` validates keys (`setCollectionColor`, `setTagColor`, optional colour on create) and maps unknown values to slate. `tailwind.config.ts` scans `lib/` so those class names are generated.
 
-### Auth-ready ownership design
+### Auth-ready ownership design (Mid-Sprint; the ownership is now enforced, see section 4b)
 
-- `user_id uuid null references auth.users(id) on delete cascade default auth.uid()` on `collections`, `notes` and `tags`.
-- For anonymous callers `auth.uid()` is null, so rows are created unowned. Once someone is signed in, the database sets the owner.
-- `note_tags` has no `user_id`; its future policies check ownership through the parent note.
-- `tags` uniqueness: unique indexes on `(user_id, lower(btrim(name))) nulls not distinct` for both `tags` and `collections`, so anonymous users cannot create duplicates that differ only by case or surrounding spaces. This requires Postgres 15+; the linked project reports 17.11 (`supabase/.temp/postgres-version`), so it is supported. Re-check if the project is ever recreated.
+- `user_id uuid references auth.users(id) on delete cascade default auth.uid()` on `collections`, `notes` and `tags`. *[Mid-Sprint: nullable. Since the Feature 7 migration (2026-10-15) it is `not null`.]*
+- *[Historical: with anonymous access, `auth.uid()` was null and rows were created unowned. Today `anon` cannot write at all and the database sets the owner for every signed-in insert.]*
+- `note_tags` has no `user_id`; its policies check ownership through the parent note and tag (section 4b).
+- `tags` uniqueness: unique indexes on `(user_id, lower(btrim(name))) nulls not distinct` for both `tags` and `collections`, so one owner cannot create duplicates that differ only by case or surrounding spaces; two different users may use the same name (to be confirmed by the optional test S2-X4). This requires Postgres 15+; the linked project reports 17.11 (`supabase/.temp/postgres-version`), so it is supported. Re-check if the project is ever recreated.
 - **`updated_at` (course requirement R2), decided:** a PostgreSQL `before update` trigger on `notes` sets `updated_at = now()`, so it stays correct regardless of which client writes and `notes-db.ts` never sends it. The column defaults to `now()` on insert. The trigger function `set_updated_at()` is created in the schema migration.
-- **Course table requirements, decided:** `collections` has the required `id`, `name`, `created_at` plus the nullable `user_id`. The extra column stays nullable for future authentication compatibility, so inserting a name alone works (R3).
+- **Course table requirements, decided:** `collections` has the required `id`, `name`, `created_at` plus the nullable `user_id`. The extra column stays nullable for future authentication compatibility, so inserting a name alone works (R3). *[Mid-Sprint decision; since Feature 7 `user_id` is `not null` with the default `auth.uid()`, so a signed-in insert of a name alone still works.]*
 - Indexes on `notes(collection_id)`, `note_tags(tag_id)` and the `user_id` columns.
 - Size limits (abuse mitigation, see section 5): title ≤ 200 characters, body ≤ 20,000, tag and collection names ≤ 50.
 - RLS is enabled on all four tables.
@@ -114,7 +114,59 @@ Planned API: *[dated note 2026-10-15: the heading is from the design phase; thes
 | Collections | `listCollections`, `createCollection` (optional colour), `setCollectionColor`, `deleteCollection` (rename optional) |
 | Tags | `listTags`, `createTag` (a tag on its own, optional colour), `addTagToNote` (find or create the tag, optional colour for a new tag, then insert into `note_tags`), `removeTagFromNote`, `setTagColor` |
 
-## 5. Temporary anonymous access and security risks
+## 4b. Route protection, per-user ownership and secure RLS (Feature 7, IMPLEMENTED)
+
+Implemented and applied on 2026-10-15 (branch `feature/user-data-isolation-rls`, migration `supabase/migrations/20261015130030_enforce_owner_access.sql`, live 13:31 UTC). Verified by 18 automated two-account tests, owner-reported browser tests and database checks; `REFLECTION.md` has the evidence and its limits. It supersedes section 5.
+
+### Server-side route protection
+
+- **Deny by default.** `lib/auth/protected-routes.ts` lists the public paths only: `/`, `/auth/*` and the starter's `/login` prefix. Every other path, including `/notes` and `/protected`, needs a verified user. Paths that try to dress up as public ones (dot segments, encoded slashes or dots, backslashes, control characters) are treated as private.
+- **Layer 1, the proxy (`lib/supabase/proxy.ts`):** an early, optimistic redirect to `/auth/login` when the verified claims (`getClaims()`) do not identify a user. It also refreshes the session cookies and keeps cookie changes on the redirect.
+- **Layer 2, the page decides.** `app/notes/page.tsx` calls `requireUser()` (`lib/auth/require-user.ts`) inside `<Suspense>` (required by `cacheComponents`) before it renders `NotesApp`, so a signed-out request is redirected and never receives the notes UI. The fallback carries no data. `redirect()` is never inside try/catch. The proxy is not relied on alone.
+- **What counts as a user.** `hasVerifiedUser`: verified claims with a non-empty `sub` that are not an anonymous sign-in (anonymous sign-ins also carry the `authenticated` database role).
+
+### Authentication and session handling
+
+- Supabase Auth with cookie sessions via `@supabase/ssr` (PKCE). Google (section 4a) and email/password both end on `/notes`. No application data is kept in `localStorage` or `sessionStorage` (S2-R3.7: code review plus the owner's Safari check).
+- `getClaims()` verifies the token signature and refreshes a token near expiry; the server client is created per request.
+- **Session loss in the UI.** If the database refuses a request because the session is gone (`NotesDbError` kind `forbidden`), the notes UI asks the server to re-check once (`lib/auth/session-loss.ts`, re-armed after a successful request); the server check then redirects to the sign-in page. Verified by deleting the authentication cookie; natural token expiry was **not** tested.
+- The display-only header status (section 4a) is unchanged and decides nothing.
+
+### The four secured tables
+
+`notes`, `collections`, `tags` and `note_tags`, all with RLS enabled. `anon` has **no** privileges and no policies; the 16 `TEMP anon …` policies were dropped and `revoke all … from anon, authenticated` ran on all four tables before the grants below.
+
+### Ownership
+
+- `user_id uuid not null default auth.uid()` on `notes`, `collections` and `tags`: the database sets the owner from the signed-in session, and `lib/notes-db.ts` still never reads or writes it.
+- `note_tags` has no `user_id`; ownership comes from its parents.
+- Existing data was never assigned to a user: after a verified backup and the owner's explicit approval it was deleted (M6, then the final cleanup on 2026-10-15; the four tables are empty), so the migration needed no backfill. The cleanup scripts are the approved exception `supabase/maintenance/` (see `CLAUDE.md`): not migrations, inert by default, one atomic statement guarded by fingerprints, never touching `auth.*`.
+
+### RLS policies (14, all `to authenticated`, `(select auth.uid())` evaluated once per statement)
+
+| Table | Policies |
+|---|---|
+| `notes` | select, insert, update, delete: `user_id` is the caller; insert and update `with check` also require `collection_id` to be null or a collection of the caller |
+| `collections` | select, insert, update, delete: `user_id` is the caller |
+| `tags` | select, insert, update: `user_id` is the caller (no delete policy: the app never deletes tags) |
+| `note_tags` | select and delete: the note belongs to the caller; insert: the note **and** the tag belong to the caller (no update policy) |
+
+### Privileges (column-level where it matters)
+
+- `authenticated`: `select` on all four; `notes` insert and update only `title, body, collection_id`, delete; `collections` insert `name, color`, update `color`, delete; `tags` insert `name, color`, update `color`; `note_tags` insert `note_id, tag_id`, delete.
+- Clients therefore cannot write `user_id`, `id`, `created_at` or `updated_at` (`updated_at` stays under the trigger). Writing an `id` is refused with SQLSTATE `428C9` because the identity columns are `generated always`, not `42501`.
+- `anon`: nothing. `service_role` and the project-wide default privileges are untouched (`CLAUDE.md`).
+
+### Cross-user protection
+
+- Foreign-key checks bypass RLS, so the policies must check references: a note cannot point at another user's collection, and a `note_tags` row needs the caller's own note and own tag. The migration starts with a guard that aborts if any row has no owner or any cross-owner reference exists.
+- Tested with two real accounts (`npm run test:rls`, 18 tests, 22 independently evaluated cases): each account sees and changes only its own rows, cross-user reads, updates, deletes and links are refused or invisible, ownership cannot be reassigned, and `anon` reads and writes nothing.
+- **Known limitation: the full migration chain cannot be replayed on a fresh database (unresolved, accepted for Sprint 2).** The historical seed migrations `20261012123644_seed_notes.sql` and `20261013094206_seed_sample_journal_data.sql` insert rows with `user_id` null (written while anonymous access was open, so `auth.uid()` was null). The Feature 7 migration starts with a guard that aborts when any row has no owner. *Why the live database works:* the approved cleanup (M6, 2026-10-15, 13:18 UTC) had emptied the four tables before the migration was applied at 13:31 UTC, so the guard found nothing and the migration succeeded. *Why a fresh reset may fail:* `supabase db reset` or a new project replays every migration in order, the seed rows exist when the Feature 7 migration runs, and its guard is expected to raise "rows without an owner exist", stopping the chain at that migration. This has not been tried (there is no local Supabase environment in this project), so it is reasoned from the migration text, not observed. *A future fix* must preserve the migration history and must not edit any already applied migration (`CLAUDE.md`): for example a new, later-dated approach that avoids creating ownerless seed data when a database is built from scratch, or a documented rebuild procedure that skips or removes the seed rows before the Feature 7 migration; the choice needs its own assessment and approval. Production data is not affected; only reproducibility from scratch is.
+- **Not covered:** a restore from backup was not tested (M3); anonymous sign-ins and leaked-password protection are dashboard settings still to be checked; the same collection name for two users and a note deletion in the browser are not yet manually confirmed (see the brief).
+
+## 5. Temporary anonymous access and security risks (HISTORICAL, superseded by section 4b)
+
+> **Historical.** Everything below describes the temporary design of the Mid-Sprint project. The `TEMP anon` policies and grants no longer exist in the live database (dropped by the Feature 7 migration on 2026-10-15), the public `/notes` route and the demo banner are gone, and the risks listed here no longer apply. It is kept as the record of the earlier decision and its rationale.
 
 ### Current state (applied and verified against the live database, 2026-10-13)
 
@@ -147,7 +199,7 @@ Planned API: *[dated note 2026-10-15: the heading is from the design phase; thes
 
 - Use only generic, non-sensitive sample data (for example "Prompt engineering basics", "What is RAG?"). No real personal notes, names or credentials.
 - Keep seed data in its own file or migration so it is easy to remove. The existing seed rows (Shopping list, Meeting notes, Ideas) are harmless but should be replaced with journal-themed samples. *[Dated note 2026-10-15: the journal-themed sample data was applied through the PR #1 migrations; its fate is an open decision for Feature 7 (PROJECT_BRIEF A10).]*
-- Show a small "Demo mode: data is publicly accessible, don't store private notes" banner, implemented as a single constant that is easy to delete.
+- Show a small "Demo mode: data is publicly accessible, don't store private notes" banner, implemented as a single constant that is easy to delete. *[Dated note 2026-10-15: the notice was removed once the temporary policies were replaced by owner-only RLS (Feature 7, M9 preparation); the file `components/notes/demo-banner.tsx` and its three uses in `notes-app.tsx` are gone, with a test that keeps them out.]*
 - Keep `.env.local` out of Git (already covered by `.env*.local` in `.gitignore`), never put a service-role or secret key in the project, and add `supabase/.temp/` to `.gitignore` before committing.
 
 ## 4a. Google sign-in (Feature 5)
@@ -164,10 +216,10 @@ Planned API: *[dated note 2026-10-15: the heading is from the design phase; thes
 Also in Supabase: Site URL `http://127.0.0.1:3000`, and Authentication → Providers → Google enabled with the client ID and secret (stored only there). The origin is `127.0.0.1` throughout (`npm run dev` binds `-H 127.0.0.1`); cookies are per origin, so mixing it with `localhost` loses the session or falls back to the Site URL.
 
 **Decisions.**
-- The destination is fixed (`/notes`, `POST_LOGIN_PATH`; Feature 6 changed it from `/protected`); the callback ignores any `next` parameter. This is navigation only: `/notes` is still open to anonymous visitors and signing in does not change what notes anyone can see.
+- The destination is fixed (`/notes`, `POST_LOGIN_PATH`; Feature 6 changed it from `/protected`); the callback ignores any `next` parameter. This is navigation only; access is decided by section 4b.
 - Email/password login and a successful password update (`components/login-form.tsx`, `components/update-password-form.tsx`) also go to `POST_LOGIN_PATH`. Sign-up sets `emailRedirectTo` to `/auth/callback`, so a confirmation link that returns with a PKCE `?code=` is exchanged for a session there and ends on `/notes`; a failed or expired link goes to `/auth/login?error=…`. `/auth/confirm` (token-hash email templates) falls back to `/notes` when `next` is missing or unsafe. Which of the two the Supabase email template uses is a dashboard setting that the repo cannot show; both end on `/notes`.
 - `/protected` remains available as the authentication test page.
-- **Sign-in status in the notes header (Feature 6 extension).** `components/notes/auth-status.tsx` shows the signed-in email and a Logout button, or a Login link to `/auth/login` for anonymous visitors. It is rendered next to the "Notes Lab" title below 768px (email hidden, search field on its own full-width row) and at the end of `TopBar` from 768px up; CSS (`md:hidden` / `max-md:hidden`) hides the other instance, so both instances are mounted. A session in the browser is confirmed with `supabase.auth.getUser()` (validated by the Supabase Auth server, not just read from the cookie); `onAuthStateChange` drives updates, decided by `authEventAction` in `lib/auth/latest.ts`: `INITIAL_SESSION` replaces a separate first check, `TOKEN_REFRESHED` is ignored, no session clears the status, and `SIGNED_IN` or `INITIAL_SESSION` for the user already verified is ignored (auth-js re-emits `SIGNED_IN` whenever a tab regains focus and in other tabs, which would otherwise repeat the check); a new user id or `USER_UPDATED` re-checks. Races: `createLatestGate` in `lib/auth/latest.ts` lets only the newest check apply its result, and sign-out invalidates checks in flight; `identityAfterCheck` keeps the previous state on a transient error and fails closed to anonymous otherwise. When signed out there is no network request; when signed in, one `getUser()` on load (the two instances share the in-flight request) and another only when the user changes. Tab focus causes no request. Only the email is used, no tokens. Screen readers hear "Signed in as <email>" at every width; the visible address (768px and up) is `aria-hidden`. Logout reuses `components/logout-button.tsx` (`signOut()`, then `/auth/login`); its "Logging out…" and error states apply to every use of the button, including the starter pages. Display only: `/notes` stays open to anonymous visitors and nothing in `lib/notes-db.ts` or the notes data flow depends on it.
+- **Sign-in status in the notes header (Feature 6 extension).** `components/notes/auth-status.tsx` shows the signed-in email and a Logout button, or a Login link to `/auth/login` for anonymous visitors. *[Since Feature 7 `/notes` redirects signed-out visitors, so the Login link only appears if the session is lost while the page is open.]* It is rendered next to the "Notes Lab" title below 768px (email hidden, search field on its own full-width row) and at the end of `TopBar` from 768px up; CSS (`md:hidden` / `max-md:hidden`) hides the other instance, so both instances are mounted. A session in the browser is confirmed with `supabase.auth.getUser()` (validated by the Supabase Auth server, not just read from the cookie); `onAuthStateChange` drives updates, decided by `authEventAction` in `lib/auth/latest.ts`: `INITIAL_SESSION` replaces a separate first check, `TOKEN_REFRESHED` is ignored, no session clears the status, and `SIGNED_IN` or `INITIAL_SESSION` for the user already verified is ignored (auth-js re-emits `SIGNED_IN` whenever a tab regains focus and in other tabs, which would otherwise repeat the check); a new user id or `USER_UPDATED` re-checks. Races: `createLatestGate` in `lib/auth/latest.ts` lets only the newest check apply its result, and sign-out invalidates checks in flight; `identityAfterCheck` keeps the previous state on a transient error and fails closed to anonymous otherwise. When signed out there is no network request; when signed in, one `getUser()` on load (the two instances share the in-flight request) and another only when the user changes. Tab focus causes no request. Only the email is used, no tokens. Screen readers hear "Signed in as <email>" at every width; the visible address (768px and up) is `aria-hidden`. Logout reuses `components/logout-button.tsx` (`signOut()`, then `/auth/login`); its "Logging out…" and error states apply to every use of the button, including the starter pages. Display only: nothing in `lib/notes-db.ts` or the notes data flow depends on it.
 - **Known limitation (logout error display).** auth-js clears the local session and emits `SIGNED_OUT` before it returns a network or server error from `signOut()`. In the notes header the component then switches to "Login" and unmounts the button, so "Logout failed" is not shown there (it is on the starter pages). The user is never shown as signed in after a failed logout, but the server-side token may not have been revoked. Accepted; no auth refactor for it.
 - **Email confirmation errors.** The callback serves Google and email links, so the generic failure text is neutral ("Sign-in could not be completed. If you just confirmed your email, sign in with your password…"). `error_code=otp_expired` from Supabase selects the code `link_expired` (expired or already-used link). That parameter only selects text, it is never evidence of a sign-in. A link opened in another browser fails the PKCE exchange (no code verifier cookie there) and shows the neutral text; the email is confirmed and password login works.
 - **Password recovery.** `/auth/confirm` sends a token-hash link of `type=recovery` to `/auth/update-password` (`confirmRedirectPath` in `lib/auth/redirect.ts`), whatever `next` says, so the password form is always shown; other types keep the validated `next` or `/notes`. The app's own forgot-password flow uses `redirectTo` = `/auth/update-password` directly and is unchanged. This was verified by automated tests only; the end-to-end recovery flow could not be retested after the change because of the Supabase email rate limit. No Supabase email-template change is required; a template that sends `{{ .SiteURL }}/auth/confirm?token_hash=…&type=recovery` works with or without `&next=`.
@@ -180,9 +232,11 @@ Also in Supabase: Site URL `http://127.0.0.1:3000`, and Authentication → Provi
 - No new dependency, table, policy or grant. `lib/notes-db.ts` and the notes UI are unchanged.
 - Tests: `npm run test:auth` (`scripts/test-auth.mts`, plain Node, no framework).
 
-**What this does not do.** Signing in does not make notes private: `/notes` stays open to `anon`, and the `TEMP anon` policies (repository evidence: `supabase/migrations/20261013094208_temp_anon_access.sql`, `to anon, authenticated using (true)`) plus grants give every `authenticated` user, now including anyone with a Google account, full access to all rows. Whether the deployed database matches the migrations has not been inspected. Not suitable for confidential data or production.
+**What this did not do at the time (Mid-Sprint; superseded by Feature 7).** Signing in did not make notes private: `/notes` was open to `anon` and the `TEMP anon` policies gave every `authenticated` user full access to all rows. Since 2026-10-15 `/notes` requires a verified user and RLS isolates each account's rows (section 4b).
 
-## 6. Future authentication migration plan
+## 6. Authentication migration plan (HISTORICAL: executed as Feature 7, see section 4b)
+
+> The plan below was written during the Mid-Sprint. It was carried out with one deliberate difference: instead of a backfill (step 2), the existing demo data was backed up and, with the owner's approval, deleted. Steps 3 to 5, 7, 8 and the checklist of step 9 are implemented.
 
 1. **Enable sign-in:** done for Google and email/password (section 4a). Decide whether sign-up should be restricted, since any Google account can now become an `authenticated` user.
 2. **Backfill:** `update … set user_id = '<owner uuid>' where user_id is null` on `collections`, `notes` and `tags`.
@@ -193,7 +247,7 @@ Also in Supabase: Site URL `http://127.0.0.1:3000`, and Authentication → Provi
    - For `note_tags`, check ownership through the parent note.
 5. **Protect the route:** remove the `/notes` exemption in `lib/supabase/proxy.ts` so unauthenticated visitors are redirected to login.
 6. **Client:** swap `getClient()` only if a server client is needed; the existing browser client already carries the session.
-7. **Clean-up:** remove the demo banner and replace the test data.
+7. **Clean-up:** remove the demo banner and replace the test data. *[Dated note 2026-10-15: the demo banner is removed and the demo and test data were deleted with the owner's approval (M6); see section 5 note and `REFLECTION.md`.]*
 8. **Verify:** two users cannot see each other's rows, and an anonymous request returns nothing.
 9. **Checklist from the PR #1 review (all additional to steps 2 to 5):**
    - `authenticated` also holds the TEMP grants and policies. With the template's sign-up pages, anyone who signs up can read and change every row until the TEMP policies are dropped, so drop them in the same migration that adds owner policies.
@@ -212,7 +266,7 @@ How this architecture supports the 12 course requirements (R) and the evaluation
 |---|---|---|
 | R1 | `lib/notes-db.ts` as the only supabase-js access point (section 4) | Implemented. `app/notes/page.tsx` no longer queries Supabase. One accepted exception remains: the starter's `components/tutorial/fetch-data-steps.tsx` (used only by the unused `/protected` page) still calls `supabase.from('notes')`; see `REFLECTION.md`. |
 | R2 | `notes` table with `updated_at` (section 3) | Supported; `updated_at` is maintained by a PostgreSQL trigger (decided). |
-| R3 | `collections(id, name, created_at, user_id)` | Supported; the extra `user_id` stays nullable (decided). |
+| R3 | `collections(id, name, created_at, user_id)` | Supported; the extra `user_id` stayed nullable in the Mid-Sprint (decided); `not null` since Feature 7. |
 | R4 | `notes.collection_id`, nullable FK, `ON DELETE SET NULL` | Supported. |
 | R5 | `tags` and `note_tags` with composite PK | Supported. |
 | R6 | `listNotes` plus `listCollections`, grouped in memory; "Uncollected" is `collection_id is null` | Supported. UI split decided: sidebar tree with notes, middle filtered list, shared note card. *[Superseded by the Feature 4 scope change: the sidebar is a flat list and notes are listed only in the middle column, see section 2.]* |
@@ -237,10 +291,11 @@ How this architecture supports the 12 course requirements (R) and the evaluation
 |---|---|---|
 | Client-side data layer with in-memory filtering and search | Simplest; instant live search; fits a small single-user journal | Whole dataset loads into the browser; stops being suitable at thousands of notes. Postgres `ilike` or full-text search can be added inside `notes-db.ts` later |
 | Server Actions not used | Adds a layer with little benefit at this size | None for the MVP |
-| Temporary anon policies isolated in one migration | Required because there is no auth but writes are needed; removal is a single migration | Real exposure if the key leaks (section 5) |
+| Temporary anon policies isolated in one migration *(historical, removed by Feature 7)* | Was required while there was no per-user data; removal was a single migration | Real exposure if the key leaked (section 5) |
 | `updated_at` via a PostgreSQL trigger | Correct for any client; no application code involved | One more database object to maintain |
 | Three-column UI with a shared note-card component | Meets R6/R9 (notes and tags in the sidebar) and keeps the agreed layout | Sidebar tree and middle list show overlapping notes, kept in sync from one state |
-| Nullable `user_id` with `default auth.uid()` | Makes the later ownership migration a backfill plus policy swap | Slightly more schema now |
+| Nullable `user_id` with `default auth.uid()` *(superseded: `not null` since Feature 7)* | Made the later ownership migration a policy swap | The data had to be deleted instead of backfilled |
+| Owner-only RLS with column-level grants, proxy plus `requireUser()` (Feature 7) | The database enforces isolation whatever the client sends; the page does not depend on the proxy alone | Tags cannot be deleted by users; every new table needs the same pattern and a cross-user test |
 | Google sign-in added to the starter's auth pages (Feature 5) | Reuses Supabase Auth and the existing SSR setup; no new dependency | Sign-in does not yet protect notes (section 4a) |
 | PostgREST embedding for joins; counts computed in memory | No extra queries needed for note count badges | None at this scale |
 
@@ -248,15 +303,11 @@ Dependencies (existing in `package.json`): Next.js (`latest`, uses the `proxy.ts
 
 ## 9. Planned architecture for Sprint 2 (NOT IMPLEMENTED)
 
-Everything in this section is a **plan** for the features in the [PROJECT_BRIEF.md](./PROJECT_BRIEF.md) Part A roadmap. None of it exists in the code or the database today. Each feature gets its own architecture assessment before development; statements about Supabase behaviour below must be checked against the official documentation and added to `docs/SUPABASE_REFERENCES.md` when relied on. Written 2026-10-15; no verification of these plans has been done.
+Everything in this section is a **plan** for the features in the [PROJECT_BRIEF.md](./PROJECT_BRIEF.md) Part A roadmap. Except for 9.1 (Feature 7, now implemented, see section 4b), none of it exists in the code or the database today. Each feature gets its own architecture assessment before development; statements about Supabase behaviour below must be checked against the official documentation and added to `docs/SUPABASE_REFERENCES.md` when relied on. Written 2026-10-15; no verification of these plans has been done.
 
-### 9.1 Feature 7: server-side route protection and per-user ownership
+### 9.1 Feature 7: server-side route protection and per-user ownership (IMPLEMENTED, see section 4b)
 
-- **Route protection.** Remove the `/notes` exemption in `lib/supabase/proxy.ts` so a signed-out request is redirected to `/auth/login`. The proxy already verifies the session with `getClaims()` for every matched request. Whether the proxy check alone is enough, or whether the `/notes` page should also verify the user in a Server Component, is an open design decision (`CLAUDE.md`: never rely solely on client-side session state). `components/notes/auth-status.tsx` stays display-only; its Login link and the demo banner no longer apply once `/notes` is private.
-- **Ownership.** `user_id` becomes `not null default auth.uid()` on `notes`, `collections`, `tags` after a **reviewed, approved** backfill (existing data plan: PROJECT_BRIEF A10; the section 6 steps and checklist stay the technical outline). Existing rows are not assigned automatically.
-- **Policies.** Owner policies `to authenticated` with `(select auth.uid()) = user_id` (and `with check`), one per operation and table; `note_tags` checks the parent note and the tag. Drop the 16 `TEMP anon …` policies and the anon and `authenticated` TEMP grants in the same migration that adds owner policies, and keep every table's `revoke all` rule. Cross-owner references (`note_tags`, `notes.collection_id`) need checks on both parents, plus tests.
-- **Unchanged by design.** `lib/notes-db.ts` keeps not reading or writing `user_id` and not containing role logic (the database default and RLS do the work). Google and email/password sign-in both continue to work; accounts are not merged on a matching email (PROJECT_BRIEF A11, an assumption about Supabase's default linking still to be checked).
-- **Uniqueness.** The unique name indexes are already `(user_id, lower(btrim(name)))`, so two users may use the same tag or collection name once `user_id` is set; to be tested.
+The plan written on 2026-10-15 was carried out the same day; section 4b is the description of what exists. Differences from the plan: the page check is a Server Component call to `requireUser()` (the open design decision is settled: proxy plus page), the existing data was deleted with the owner's approval instead of being backfilled, and the unique name indexes are per owner (two users may share a name; the optional test S2-X4 would confirm it). Still open before the feature is complete: documentation and review steps, the commit, push, PR and merge (see the brief).
 
 ### 9.2 Feature 8: rich-text editor (additional product requirement)
 

@@ -45,6 +45,8 @@ export function useNotesData() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [loadError, setLoadError] = useState<string | null>(null);
+  // NotesDbError kind of the failed initial load (the UI uses it to detect a lost session).
+  const [loadErrorKind, setLoadErrorKind] = useState<string | null>(null);
 
   const fetchAll = useCallback(async () => {
     const [n, c, t] = await Promise.all([listNotes(), listCollections(), listTags()]);
@@ -59,11 +61,13 @@ export function useNotesData() {
     try {
       await fetchAll();
       setLoadError(null);
+      setLoadErrorKind(null);
       setStatus("ready");
     } catch (error) {
       setLoadError(
         error instanceof NotesDbError ? error.message : "Could not load your notes.",
       );
+      setLoadErrorKind(error instanceof NotesDbError ? error.kind : null);
       setStatus("error");
     }
   }, [fetchAll]);
@@ -178,6 +182,7 @@ export function useNotesData() {
     tags,
     status,
     loadError,
+    loadErrorKind,
     reload,
     refresh,
     addNote,

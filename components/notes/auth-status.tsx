@@ -27,8 +27,9 @@ function sharedGetUser(supabase: ReturnType<typeof createClient>) {
 
 // Sign-in status for the notes header (rendered twice: in the top bar from 768px
 // up, and next to the app title below 768px; the caller hides the other one).
-// Display only: /notes stays open to anonymous visitors and the notes data never
-// depends on this component. A session in the browser is confirmed with
+// Display only: /notes is protected on the server (a signed-out visitor never gets
+// this page, so the Login link only shows if the session is lost while it is open)
+// and the notes data never depends on this component. A session in the browser is confirmed with
 // getUser(), which asks the Supabase Auth server, so the shown identity is not
 // just whatever the cookie claims. Only the newest check may update the state.
 export function AuthStatus({ className }: { className?: string }) {

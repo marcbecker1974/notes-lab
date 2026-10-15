@@ -3,8 +3,9 @@
 // the route handler supplies the real code exchange.
 
 // Where every successful sign-in, email confirmation and password update ends.
-// Navigation only: /notes stays open to anonymous visitors (docs/ARCHITECTURE.md);
-// /protected remains as the auth test page.
+// Navigation only: /notes requires a signed-in user, verified on the server (proxy
+// plus requireUser(); docs/ARCHITECTURE.md section 4b); /protected remains as the
+// auth test page.
 export const POST_LOGIN_PATH = "/notes";
 
 export type OAuthErrorCode =

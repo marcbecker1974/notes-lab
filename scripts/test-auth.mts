@@ -13,7 +13,16 @@ import {
   createLatestGate,
   identityAfterCheck,
 } from "../lib/auth/latest.ts";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import {
+  LOGIN_PATH,
+  hasVerifiedUser,
+  isPublicPath,
+} from "../lib/auth/protected-routes.ts";
+import {
+  createSessionLossGate,
+  isSessionLossKind,
+} from "../lib/auth/session-loss.ts";
 import {
   PASSWORD_UPDATE_PATH,
   confirmRedirectPath,
@@ -396,6 +405,527 @@ await test("/auth/confirm routes its destination through confirmRedirectPath", (
   assert.ok(
     code.includes("confirmRedirectPath") && !code.includes("/protected"),
   );
+});
+
+// --- Sprint 2 M1: server-side protection of /notes ----------------------
+for (const path of [
+  "/",
+  "/auth",
+  "/auth/login",
+  "/auth/sign-up",
+  "/auth/sign-up-success",
+  "/auth/forgot-password",
+  "/auth/update-password",
+  "/auth/callback",
+  "/auth/confirm",
+  "/auth/error",
+  "/login",
+  "/login/anything",
+]) {
+  await test(`public path: ${path}`, () =>
+    assert.equal(isPublicPath(path), true));
+}
+for (const path of [
+  "/notes",
+  "/notes/",
+  "/notes/anything",
+  "/notes?x=1",
+  "/protected",
+  "/protected/x",
+  "/authors", // starts with /auth but is not under /auth/
+  "/auth-notes",
+  "/login-x",
+  "/api/anything",
+  "//notes",
+  "//auth/login",
+  "/Notes",
+  "",
+  "notes",
+]) {
+  await test(`protected path: ${JSON.stringify(path)}`, () =>
+    assert.equal(isPublicPath(path), false));
+}
+await test("/notes is protected and is the post-login destination", () => {
+  assert.equal(POST_LOGIN_PATH, "/notes");
+  assert.equal(isPublicPath(POST_LOGIN_PATH), false);
+  assert.equal(LOGIN_PATH, "/auth/login");
+  assert.equal(isPublicPath(LOGIN_PATH), true);
+});
+await test("a public prefix cannot be used to reach /notes (dot-segments, encodings)", () => {
+  for (const path of [
+    "/auth/../notes",
+    "/auth/./../notes",
+    "/auth/..%2fnotes",
+    "/auth/..%2Fnotes",
+    "/auth/%2e%2e/notes",
+    "/auth/%2E%2E%2Fnotes",
+    "/auth/..%5cnotes",
+    "/auth/..\\notes",
+    "/auth/login%2f..%2f..%2fnotes",
+    "/auth/\u0000notes",
+    "/login/../notes",
+  ]) {
+    assert.equal(isPublicPath(path), false, path);
+  }
+  // The normalised form a URL parser produces is protected too.
+  assert.equal(isPublicPath(new URL("/auth/../notes", ORIGIN).pathname), false);
+});
+await test("hasVerifiedUser accepts only real signed-in claims", () => {
+  assert.equal(
+    hasVerifiedUser({ sub: "921d5ba0-e423-473d-a013-0934e626dc49" }),
+    true,
+  );
+  assert.equal(
+    hasVerifiedUser({ sub: "u1", role: "authenticated", is_anonymous: false }),
+    true,
+  );
+  for (const bad of [
+    null,
+    undefined,
+    {},
+    { sub: "" },
+    { sub: 42 },
+    { sub: null },
+    { sub: "u1", is_anonymous: true },
+    "sub",
+    [],
+    { role: "anon" },
+  ]) {
+    assert.equal(hasVerifiedUser(bad), false, JSON.stringify(bad));
+  }
+});
+await test("the proxy uses the shared decision and has no /notes exemption", () => {
+  const code = src("lib/supabase/proxy.ts");
+  assert.ok(
+    code.includes("isPublicPath(") && code.includes("hasVerifiedUser("),
+  );
+  assert.ok(code.includes("LOGIN_PATH"));
+  assert.ok(!code.includes('"/notes"'), "the proxy must not mention /notes");
+  assert.ok(!code.includes('startsWith("/auth")'), "no loose prefix check");
+  // A redirect keeps the session cookie changes (for example a cleared expired session).
+  assert.ok(code.includes("redirectResponse.cookies.set"));
+});
+await test("/notes verifies the user on the server before rendering the UI", () => {
+  const page = src("app/notes/page.tsx");
+  assert.ok(page.includes('from "@/lib/auth/require-user"'));
+  assert.ok(
+    page.includes("<Suspense"),
+    "cacheComponents: runtime data needs Suspense",
+  );
+  const check = page.indexOf("await requireUser()");
+  const ui = page.indexOf("<NotesApp />");
+  assert.ok(
+    check > -1 && ui > check,
+    "requireUser() must run before <NotesApp />",
+  );
+  assert.ok(
+    !page.includes('"use client"'),
+    "the page must stay a Server Component",
+  );
+});
+await test("requireUser verifies claims on the server and redirects to the sign-in page", () => {
+  const code = src("lib/auth/require-user.ts");
+  assert.ok(code.includes('import "server-only"'));
+  assert.ok(code.includes("getClaims()"));
+  assert.ok(
+    code.includes("hasVerifiedUser(") && code.includes("redirect(LOGIN_PATH)"),
+  );
+  assert.ok(
+    !code.includes("getSession"),
+    "getSession() is not verified on the server",
+  );
+  assert.ok(
+    !code.includes("try {"),
+    "redirect() throws; it must not sit inside try/catch",
+  );
+});
+await test("browser-side session state is not what protects /notes", () => {
+  // The only browser-side session read in the notes UI is the display-only status.
+  for (const f of [
+    "components/notes/notes-app.tsx",
+    "components/notes/use-notes-data.ts",
+    "app/notes/page.tsx",
+  ]) {
+    const code = src(f);
+    assert.ok(
+      !code.includes("auth.getSession") && !code.includes("auth.getUser"),
+      f,
+    );
+  }
+});
+await test("login, Google callback and password forms still end on /notes", () => {
+  for (const f of [
+    "components/login-form.tsx",
+    "components/update-password-form.tsx",
+    "app/auth/confirm/route.ts",
+  ]) {
+    assert.ok(src(f).includes("POST_LOGIN_PATH"), f);
+  }
+  assert.ok(
+    src("lib/auth/oauth-callback.ts").includes('POST_LOGIN_PATH = "/notes"'),
+  );
+});
+
+// --- Sprint 2 M1: session loss ---------------------------------------------
+await test("only a refused request counts as a lost session", () => {
+  assert.equal(isSessionLossKind("forbidden"), true);
+  for (const kind of [
+    "not_found",
+    "duplicate",
+    "invalid",
+    "unknown",
+    "",
+    null,
+    undefined,
+  ]) {
+    assert.equal(
+      isSessionLossKind(kind as string | null | undefined),
+      false,
+      String(kind),
+    );
+  }
+});
+await test("session-loss gate refreshes once, then only after a reset", () => {
+  let refreshes = 0;
+  const gate = createSessionLossGate(() => {
+    refreshes++;
+  });
+  assert.equal(gate.onError("unknown"), false);
+  assert.equal(gate.onError(null), false);
+  assert.equal(refreshes, 0);
+  assert.equal(gate.onError("forbidden"), true);
+  assert.equal(
+    gate.onError("forbidden"),
+    false,
+    "no refresh loop for a persistent error",
+  );
+  assert.equal(refreshes, 1);
+  gate.reset(); // a request succeeded: the session works again
+  assert.equal(gate.onError("forbidden"), true);
+  assert.equal(refreshes, 2);
+});
+await test("the notes UI re-checks the session on a refused request", () => {
+  const app = src("components/notes/notes-app.tsx");
+  assert.ok(
+    app.includes("createSessionLossGate") && app.includes("router.refresh()"),
+  );
+  assert.ok(app.includes("sessionLoss.onError(e.kind)"));
+  assert.ok(app.includes("sessionLoss.onError(data.loadErrorKind)"));
+  assert.ok(
+    src("components/notes/use-notes-data.ts").includes("loadErrorKind"),
+  );
+});
+await test("rejected or expired JWT errors map to the refused-request kind", () => {
+  const code = src("lib/notes-db.ts");
+  for (const c of ["42501", "PGRST301", "PGRST302", "PGRST303"]) {
+    assert.ok(code.includes(`case "${c}":`), c);
+  }
+  assert.ok(!code.includes("user_id:"), "notes-db still never writes user_id");
+});
+
+// --- Sprint 2 M4: static checks of the SQL and the isolation tests (nothing is executed) ---
+import { readdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const migrationFile = readdirSync(
+  new URL("../supabase/migrations/", import.meta.url),
+).find((f) => f.endsWith("_enforce_owner_access.sql"));
+const MIGRATION = migrationFile
+  ? src(`supabase/migrations/${migrationFile}`)
+  : "";
+const sqlCode = (text: string) => text.replace(/--[^\n]*/g, ""); // statements only, without comments
+await test("owner-access migration: exists, is newer than every earlier migration", () => {
+  assert.ok(migrationFile, "migration file not found");
+  const names = readdirSync(
+    new URL("../supabase/migrations/", import.meta.url),
+  ).sort();
+  assert.equal(names[names.length - 1], migrationFile);
+});
+await test("owner-access migration: every policy is `to authenticated` with an owner check, one per operation", () => {
+  const m = sqlCode(MIGRATION);
+  const policies = m.match(/create policy[\s\S]*?;/g) ?? [];
+  assert.equal(
+    policies.length,
+    14,
+    "notes 4, collections 4, tags 3, note_tags 3",
+  );
+  for (const p of policies) {
+    assert.ok(/\bto authenticated\b/.test(p), p.slice(0, 60));
+    assert.ok(
+      p.includes("(select auth.uid())"),
+      "auth.uid() must be wrapped in a select",
+    );
+    assert.ok(
+      !/using\s*\(\s*true\s*\)|with check\s*\(\s*true\s*\)/i.test(p),
+      "no open policy",
+    );
+  }
+  for (const op of ["select", "insert", "update", "delete"]) {
+    for (const t of ["notes", "collections"])
+      assert.ok(m.includes(`"owner ${op} ${t}"`), `${op} ${t}`);
+  }
+  for (const op of ["select", "insert", "update"])
+    assert.ok(m.includes(`"owner ${op} tags"`), `${op} tags`);
+  assert.ok(
+    !m.includes('"owner delete tags"') &&
+      !m.includes('"owner update note_tags"'),
+  );
+  for (const op of ["select", "insert", "delete"])
+    assert.ok(m.includes(`"owner ${op} note_tags"`), `${op} note_tags`);
+  for (const u of m.match(/for update[\s\S]*?;/g) ?? [])
+    assert.ok(
+      /using/.test(u) && /with check/.test(u),
+      "update needs USING and WITH CHECK",
+    );
+});
+await test("owner-access migration: drops exactly the 16 temporary policies named in the temp migration", () => {
+  const temp = src("supabase/migrations/20261013094208_temp_anon_access.sql");
+  const created = [
+    ...temp.matchAll(/create policy "(TEMP anon [^"]+)" on public\.(\w+)/g),
+  ]
+    .map((m) => `${m[1]}|${m[2]}`)
+    .sort();
+  const dropped = [
+    ...sqlCode(MIGRATION).matchAll(
+      /drop policy "(TEMP anon [^"]+)" on public\.(\w+)/g,
+    ),
+  ]
+    .map((m) => `${m[1]}|${m[2]}`)
+    .sort();
+  assert.equal(created.length, 16);
+  assert.deepEqual(dropped, created);
+});
+await test("owner-access migration: ownership NOT NULL, revoke before grant, no anon or service-role access", () => {
+  const m = sqlCode(MIGRATION);
+  assert.equal((m.match(/alter column user_id set not null/g) ?? []).length, 3);
+  assert.ok(
+    !/alter column user_id (drop default|set default)/.test(m),
+    "the auth.uid() default stays",
+  );
+  const revoke = m.indexOf(
+    "revoke all on table public.notes, public.collections, public.tags, public.note_tags",
+  );
+  assert.ok(
+    revoke > -1 &&
+      /from anon, authenticated;/.test(m.slice(revoke, revoke + 200)),
+  );
+  assert.ok(
+    revoke < m.indexOf("grant select"),
+    "revoke all must come before any grant",
+  );
+  assert.ok(
+    !/\bgrant\b[^;]*\bto\b[^;]*\banon\b/i.test(m),
+    "anon gets no grant",
+  );
+  assert.ok(
+    !/to anon|to public|service_role|security definer|auth\.role\(|user_metadata|alter default privileges|all tables in schema|truncate/i.test(
+      m,
+    ),
+  );
+  // Clients never get write access to ownership or system-managed columns.
+  const grants = m.match(/grant (insert|update) \([^)]*\)/g) ?? [];
+  assert.ok(grants.length >= 7);
+  for (const g of grants)
+    assert.ok(!/user_id|created_at|updated_at|\bid\b/.test(g), g);
+  assert.ok(
+    !/grant (insert|update|delete|all)[^(;]*;/i.test(
+      m.replace(/grant delete on [\w. ,]+ to authenticated;/g, ""),
+    ),
+    "only column-level INSERT/UPDATE grants",
+  );
+});
+await test("owner-access migration: guard aborts on unowned rows and cross-owner references; no data change", () => {
+  const m = sqlCode(MIGRATION);
+  assert.ok(
+    m.includes("raise exception") &&
+      m.includes("user_id is null") &&
+      m.includes("cross-owner"),
+  );
+  assert.ok(
+    !/\b(delete from|insert into|update public\.)/i.test(m),
+    "a schema migration must not change data",
+  );
+});
+const CLEANUP = src("supabase/maintenance/cleanup_approved_demo_data.sql");
+await test("cleanup script: inert by default, atomic, exact ids, never touches accounts", () => {
+  const c = sqlCode(CLEANUP);
+  assert.ok(
+    /v_approved constant boolean := false;/.test(c),
+    "the committed script must be inert",
+  );
+  assert.ok(!/\b(commit|rollback|truncate|drop|alter|grant|revoke)\b/i.test(c));
+  assert.equal(
+    (c.match(/\bdo \$\$/g) ?? []).length,
+    1,
+    "one DO statement = atomic",
+  );
+  assert.equal(
+    (c.match(/delete from public\.(note_tags|notes|collections|tags)\b/g) ?? [])
+      .length,
+    4,
+  );
+  for (const stmt of c.match(/delete from[\s\S]*?;/g) ?? [])
+    assert.ok(/where/i.test(stmt), "every delete is restricted");
+  // auth.* is only counted, never written; no owner is ever assigned.
+  for (const m of c.matchAll(/auth\.\w+/g)) assert.equal(m[0], "auth.users");
+  assert.ok(!/(insert|update|delete)[^;]*auth\.users/i.test(c));
+  assert.ok(!/set user_id|user_id\s*=/.test(c), "no reassignment");
+  for (const md5 of [
+    "8e7c781eb369498b30d43f0a7628ffc4",
+    "66c6a7c4ad0d8a721a1f8a0459b58690",
+    "33542fe7e1d4df0018546ed87acf3e14",
+    "2780b53a38208ae049f4746581cc8b87",
+  ]) {
+    assert.ok(c.includes(md5), md5);
+  }
+  assert.ok(/cleanup aborted/.test(c) && /share row exclusive/.test(c));
+});
+const RLS_TEST = src("scripts/test-rls.mts");
+await test("isolation tests: refuse to write while anonymous can read; credentials only from git-ignored env", () => {
+  assert.ok(RLS_TEST.includes("--dry-run") && RLS_TEST.includes('"--run"'));
+  const gate = RLS_TEST.indexOf("Safety gate 1");
+  const runner = RLS_TEST.indexOf("for (const { name, fn } of tests)");
+  assert.ok(
+    gate > -1 && runner > gate,
+    "the gate runs before any test is executed",
+  );
+  const gate2 = RLS_TEST.indexOf("Safety gate 2");
+  assert.ok(
+    gate2 > gate && gate2 < runner,
+    "the sign-in gate also runs before any test",
+  );
+  assert.ok(RLS_TEST.includes("process.exit(3)"));
+  assert.ok(
+    !/console\.(log|error)\([^)]*(PASSWORD|EMAIL)\b/.test(
+      RLS_TEST.replace(/NEEDED[\s\S]*?\] as const/, ""),
+    ),
+    "credentials are never printed",
+  );
+  assert.ok(
+    !/service_role|secret_key|SUPABASE_SERVICE|SECRET/i.test(
+      RLS_TEST.replace(/\/\/[^\n]*/g, ""), // code only: the header comment may say "no secret key"
+    ),
+  );
+  assert.ok(
+    RLS_TEST.includes('".env.test.local"') &&
+      !/(password|email)\s*[:=]\s*["'][^"']+["']/i.test(RLS_TEST),
+  );
+  for (const file of [".env.test.local", ".env.local"]) {
+    const ignored = spawnSync("git", ["check-ignore", "-q", file], {
+      cwd: new URL("..", import.meta.url),
+    });
+    assert.equal(ignored.status, 0, `${file} must be git-ignored`);
+  }
+});
+
+await test("isolation test 11: 428C9 only for identity-column cases, every attempt evaluated on its own", () => {
+  const code = RLS_TEST.replace(/\/\/[^\n]*/g, "");
+  assert.equal(
+    (code.match(/428C9/g) ?? []).length,
+    1,
+    "428C9 appears once, as a named constant",
+  );
+  assert.ok(/IDENTITY_REFUSAL = "428C9"/.test(code));
+  assert.ok(
+    /identity\s*&&\s*r\.error !== null\s*&&\s*r\.error\.code === IDENTITY_REFUSAL/.test(
+      code,
+    ),
+    "the identity code is only accepted when the case is flagged",
+  );
+  assert.ok(
+    /identity: field === "id"/.test(code),
+    "only id fields are flagged as identity cases",
+  );
+  const from = code.indexOf('"ownership and system-managed fields');
+  const block = code.slice(
+    from,
+    code.indexOf('"tags cannot be deleted by clients'),
+  );
+  assert.ok(from > -1 && block.length > 100);
+  assert.ok(
+    block.includes("refused(r, c.identity === true)") &&
+      block.includes("failures.push("),
+  );
+  assert.equal(
+    (block.match(/\bassert\./g) ?? []).length,
+    1,
+    "one final assert: no case can stop the others",
+  );
+  assert.ok(
+    (block.match(/\n\s+(ins|upd)\(/g) ?? []).length >= 20,
+    "at least 20 protected-field cases",
+  );
+  for (const f of ["user_id", "created_at", "updated_at", "name"])
+    assert.ok(block.includes(`"${f}"`), f);
+});
+
+await test("Feature 7 test-data cleanup script: inert by default, atomic, exactly the approved scope, never touches accounts", () => {
+  const c = sqlCode(src("supabase/maintenance/cleanup_feature7_test_data.sql"));
+  assert.ok(
+    /v_approved constant boolean := false;/.test(c),
+    "the committed script must be inert",
+  );
+  assert.ok(!/\b(commit|rollback|truncate|drop|alter|grant|revoke)\b/i.test(c));
+  assert.equal(
+    (c.match(/\bdo \$\$/g) ?? []).length,
+    1,
+    "one DO statement = atomic",
+  );
+  const deletes = (c.match(/delete from[\s\S]*?;/g) ?? []).map((d) =>
+    d.replace(/\s+/g, " "),
+  );
+  assert.deepEqual(deletes, [
+    "delete from public.note_tags where (note_id, tag_id) in ((300, 118), (300, 119));",
+    "delete from public.notes where id in (300, 301, 302);",
+    "delete from public.collections where id = 109;",
+    "delete from public.tags where id in (114, 115, 118, 119);",
+  ]);
+  assert.equal(
+    (c.match(/'[0-9a-f]{32}'/g) ?? []).length,
+    4,
+    "one fingerprint per table",
+  );
+  assert.ok(
+    /provider'\s*=\s*'google'/.test(c) && /provider'\s*=\s*'email'/.test(c),
+    "owners are checked by provider",
+  );
+  for (const m of c.matchAll(/auth\.\w+/g))
+    assert.ok(["auth.users", "auth.identities"].includes(m[0]), m[0]);
+  assert.ok(
+    /v_identities_after <> v_identities_before/.test(c),
+    "the accounts must be unchanged",
+  );
+  assert.ok(
+    !/(insert|update)[^;]*(auth\.|public\.)/i.test(c),
+    "no writes besides the four deletes",
+  );
+  assert.ok(
+    !existsSync(
+      new URL("../supabase/maintenance/cleanup_test_tags.sql", import.meta.url),
+    ),
+    "the overlapping tags-only script is gone",
+  );
+});
+
+await test("the obsolete demo-mode banner is gone (the data is private since the owner-access migration)", () => {
+  assert.ok(
+    !existsSync(
+      new URL("../components/notes/demo-banner.tsx", import.meta.url),
+    ),
+    "demo-banner.tsx must not exist",
+  );
+  for (const f of [
+    "components/notes/notes-app.tsx",
+    "components/notes/top-bar.tsx",
+    "components/notes/sidebar.tsx",
+    "components/notes/sidebar-panel.tsx",
+    "app/notes/page.tsx",
+  ]) {
+    const code = src(f);
+    assert.ok(
+      !/DemoBanner|demo-banner|DEMO_NOTICE|publicly accessible/i.test(code),
+      f,
+    );
+  }
 });
 
 if (failed) {

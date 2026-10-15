@@ -1,5 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import {
+  hasVerifiedUser,
+  isPublicPath,
+  LOGIN_PATH,
+} from "@/lib/auth/protected-routes";
 import { hasEnvVars } from "../utils";
 
 export async function updateSession(request: NextRequest) {
@@ -47,17 +52,20 @@ export async function updateSession(request: NextRequest) {
   const { data } = await supabase.auth.getClaims();
   const user = data?.claims;
 
-  if (
-    request.nextUrl.pathname !== "/" &&
-    request.nextUrl.pathname !== "/notes" &&
-    !user &&
-    !request.nextUrl.pathname.startsWith("/login") &&
-    !request.nextUrl.pathname.startsWith("/auth")
-  ) {
-    // no user, potentially respond by redirecting the user to the login page
+  // Sprint 2 (S2-R2): everything except the public paths needs a verified user,
+  // including /notes. This is the early, optimistic redirect; the page itself
+  // verifies the user again on the server (lib/auth/require-user.ts).
+  if (!hasVerifiedUser(user) && !isPublicPath(request.nextUrl.pathname)) {
     const url = request.nextUrl.clone();
-    url.pathname = "/auth/login";
-    return NextResponse.redirect(url);
+    url.pathname = LOGIN_PATH;
+    url.search = "";
+    const redirectResponse = NextResponse.redirect(url);
+    // Keep any session cookie changes made above (for example the removal of an
+    // expired or revoked session), so the browser stops sending the stale cookies.
+    supabaseResponse.cookies.getAll().forEach((cookie) => {
+      redirectResponse.cookies.set(cookie);
+    });
+    return redirectResponse;
   }
 
   // IMPORTANT: You *must* return the supabaseResponse object as it is.

@@ -119,6 +119,13 @@ function toNotesDbError(operation: string, error: DbError | unknown): NotesDbErr
         error,
       );
     case "42501":
+    // A rejected, expired or missing JWT (PostgREST 401). The PostgREST docs do not say
+    // which of 301 and 303 reports an expired token, so both are treated like a refused
+    // request; the UI then asks the server to re-check the session. Error classification
+    // only: this module still has no role or user logic.
+    case "PGRST301":
+    case "PGRST302":
+    case "PGRST303":
       return new NotesDbError("forbidden", operation, "This action is not allowed.", error);
     default:
       return new NotesDbError(
