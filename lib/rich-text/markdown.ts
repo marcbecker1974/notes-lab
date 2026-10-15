@@ -10,6 +10,8 @@ import { Underline } from "@tiptap/extension-underline";
 import { MarkdownManager } from "@tiptap/markdown";
 import StarterKit from "@tiptap/starter-kit";
 
+import { splitFrontMatter } from "../note-markdown.ts";
+
 /** `<u>…</u>` with the inner text parsed as Markdown, so bold, italic and links inside survive. */
 export const MarkdownUnderline = Underline.extend({
   renderMarkdown(node, helpers) {
@@ -159,19 +161,13 @@ function docParts(doc: JSONContent) {
   return { links, code };
 }
 
-// YAML front matter: a first line `---`, then only `key: value`, list, indented or
-// comment lines, closed by `---` or `...`. The editor would turn it into a rule and a
-// heading (`## title: x`), so such a note stays in source mode. A rule, some prose and
-// another rule is not front matter (a prose line is not a YAML line).
-const FRONT_MATTER = /^\uFEFF?---[ \t]*\r?\n((?:(?![ \t]*(?:---|\.\.\.)[ \t]*$)[^\n]*\n?)*?)[ \t]*(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;
-const YAML_LINE = /^(?:[ \t]*$|[ \t]*#|[ \t]+\S|[ \t]*-(?:[ \t]|$)|[^\s:#][^:\n]*:(?:[ \t]|$))/;
+// YAML front matter (detected by `splitFrontMatter`, shared with the export): the
+// editor would turn it into a rule and a heading (`## title: x`), so such a note stays
+// in source mode.
 
 /** True when the Markdown starts with a YAML front matter block. */
 export function hasFrontMatter(source: string): boolean {
-  const match = FRONT_MATTER.exec(source);
-  if (!match) return false;
-  const lines = match[1].split(/\r?\n/).filter((line) => line.trim() !== "");
-  return lines.length > 0 && lines.every((line) => YAML_LINE.test(line)) && lines.some((line) => /^[^\s#-][^:\n]*:/.test(line));
+  return splitFrontMatter(source) !== null;
 }
 
 /**

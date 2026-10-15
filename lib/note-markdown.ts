@@ -8,6 +8,9 @@
 // editor writes is `<u>text</u>` for underline: standard Markdown has no underline
 // syntax, and CommonMark allows inline HTML, so most viewers show it underlined and
 // the others show the plain text.
+//
+// YAML front matter only works at the very start of a file, so when the saved body
+// starts with it, the export writes the block first, then the `# Title`, then the rest.
 
 type ExportableNote = { title: string; body: string };
 
@@ -19,12 +22,38 @@ const UNSAFE = /[\\/:*?"<>|\u0000-\u001f\u007f​-‏‪-‮⁦-⁩﻿]/g;
 // Windows reserves these names with any extension too (CON.txt.md is still CON).
 const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³]|conin\$|conout\$)$/i;
 
+// YAML front matter: a first line `---`, then only `key: value`, list, indented or
+// comment lines, closed by `---` or `...`. A rule, some prose and another rule is not
+// front matter (a prose line is not a YAML line). Also used by the editor's guard.
+const FRONT_MATTER = /^\uFEFF?---[ \t]*\r?\n((?:(?![ \t]*(?:---|\.\.\.)[ \t]*$)[^\n]*\n?)*?)[ \t]*(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;
+const YAML_LINE = /^(?:[ \t]*$|[ \t]*#|[ \t]+\S|[ \t]*-(?:[ \t]|$)|[^\s:#][^:\n]*:(?:[ \t]|$))/;
+
+/** The front matter block (as written, no BOM) and the text after it, or null when the body has none. */
+export function splitFrontMatter(body: string): { front: string; rest: string } | null {
+  const match = FRONT_MATTER.exec(body);
+  if (!match) return null;
+  const lines = match[1].split(/\r?\n/).filter((line) => line.trim() !== "");
+  const yaml =
+    lines.length > 0 && lines.every((line) => YAML_LINE.test(line)) && lines.some((line) => /^[^\s#-][^:\n]*:/.test(line));
+  if (!yaml) return null;
+  return { front: match[0].replace(/^\uFEFF/, ""), rest: body.slice(match[0].length) };
+}
+
 const lineBreaks = (text: string) => text.replace(/\r\n?/g, "\n");
 
-/** `# Title`, a blank line and the body; just the heading when the body is empty. */
+/**
+ * `# Title`, a blank line and the body; just the heading when the body is empty. A body
+ * that starts with YAML front matter is written as front matter, `# Title`, the rest.
+ */
 export function noteToMarkdown(note: ExportableNote): string {
   const title = note.title.replace(/\s+/g, " ").trim();
   const body = lineBreaks(note.body).replace(/\n+$/, "");
+  const split = splitFrontMatter(body);
+  if (split) {
+    const front = split.front.replace(/\n+$/, "");
+    const rest = split.rest.replace(/^\n+/, "");
+    return rest.trim() === "" ? `${front}\n\n# ${title}\n` : `${front}\n\n# ${title}\n\n${rest}\n`;
+  }
   return body.trim() === "" ? `# ${title}\n` : `# ${title}\n\n${body}\n`;
 }
 

@@ -313,10 +313,47 @@ test("search finds front matter keys, values and body", () => {
   for (const q of ["date: 2026-10-15", "journal", "Q4", "item", "draft"]) assert.ok(matchesQuery(note, q), q);
   assert.ok(!matchesQuery(note, "absent"));
 });
-test("export keeps the saved body with its complete front matter, byte for byte", () => {
-  for (const body of [FM_ONE, FM_MANY]) {
-    assert.equal(noteToMarkdown({ title: "T", body }), `# T\n\n${body}\n`);
+// --- Export with front matter (owner manual test N, 2026-10-15) -----------------------
+const META = '---\ntitle: AI Playbook\nversion: "2.1"\nstatus: active\n---';
+const REST = "# Operating Standard\n\nText with <u>u</u> and **b**.\n\n- a\n- b";
+test("export puts the front matter first, then the title heading, then the rest", () => {
+  const out = noteToMarkdown({ title: "Note Title", body: `${META}\n\n${REST}` });
+  assert.equal(out, `${META}\n\n# Note Title\n\n${REST}\n`);
+  assert.ok(out.startsWith("---\ntitle: AI Playbook\n"));
+  assert.ok(out.indexOf("# Note Title") > out.indexOf("status: active\n---"));
+});
+test("export keeps every metadata line and the body unchanged (several fields, lists, comments)", () => {
+  const front = "---\ntitle: \"Plan: Q4\"\ntags:\n  - ai\n  - journal\n# note\ndraft: false\n---";
+  const out = noteToMarkdown({ title: "T", body: `${front}\nBody *here*` });
+  assert.equal(out, `${front}\n\n# T\n\nBody *here*\n`);
+});
+test("export with front matter and an empty body keeps just the block and the title", () => {
+  assert.equal(noteToMarkdown({ title: "T", body: META }), `${META}\n\n# T\n`);
+  assert.equal(noteToMarkdown({ title: "T", body: `${META}\n\n\n` }), `${META}\n\n# T\n`);
+});
+test("export with front matter: CRLF becomes LF, a BOM is dropped, Unicode survives", () => {
+  const out = noteToMarkdown({ title: "Größe 日本語", body: "\uFEFF---\r\ntitle: Ünï 🚀\r\n---\r\nzweite Zeile\r\n" });
+  assert.equal(out, "---\ntitle: Ünï 🚀\n---\n\n# Größe 日本語\n\nzweite Zeile\n");
+});
+test("export of ordinary notes is unchanged (no front matter)", () => {
+  assert.equal(noteToMarkdown({ title: "T", body: "plain" }), "# T\n\nplain\n");
+  assert.equal(noteToMarkdown({ title: "T", body: "" }), "# T\n");
+  for (const body of ["---\n\nparagraph", "text\n\n---\n\nmore", "---\nsome prose line\n---\nafter", "***\ntitle: x\n***", "intro\n\n---\ntitle: x\n---"]) {
+    assert.equal(noteToMarkdown({ title: "T", body }), `# T\n\n${body}\n`, JSON.stringify(body));
   }
+});
+test("empty or malformed front matter is not rewritten", () => {
+  for (const body of ["---\n---\ntext", "---\ntitle: x\ntext", "---\n\n---\ntext", "---\nnot yaml here\n---\ntext", "---\n- only\n- items\n---\ntext"]) {
+    assert.equal(noteToMarkdown({ title: "T", body }), `# T\n\n${body}\n`, JSON.stringify(body));
+  }
+});
+test("export of front matter notes is idempotent in content and does not change the stored text", () => {
+  const body = `${META}\n\n${REST}`;
+  const copy = `${body}`;
+  noteToMarkdown({ title: "T", body });
+  assert.equal(body, copy);
+  // The body of the exported file still starts the same front matter block.
+  assert.ok(hasFrontMatter(noteToMarkdown({ title: "T", body })));
 });
 test("export works on the saved note only, never on the editor draft", () => {
   const app = read("components/notes/notes-app.tsx");
