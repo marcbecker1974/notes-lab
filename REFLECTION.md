@@ -862,3 +862,16 @@ A separate read-only agent reviewed the working-tree diff against `main` and rep
 - **Security assessment of the reviewer.** Sound: migration, grants and policies, deny-by-default routing with the server-side check, inert and atomic maintenance scripts that never write to `auth.*`, no secrets, no unrelated files in the PR. No security finding.
 - **Reviewer's recommendation for later.** Before submission, re-run `npm run test:rls -- --run` and the manual tests on the final merged head (they ran before the last documentation commit). Not done in this step.
 - **Mergeability (reported by the reviewer, 2026-10-15):** open, mergeable, clean; no CI checks exist on the branch.
+
+### Feature 7, PR #8: final independent review in a fresh Claude Code session (2026-10-15)
+
+**Status: the verdict is APPROVE (0 blocker, 0 high, 0 medium, 2 low). The owner approved the merge. No application code, migration, Supabase setting or user data was changed by this entry.**
+
+- **How it was done.** A fresh Claude Code session (cleared context) reviewed the diff `origin/main...HEAD` at `c11e1d9`, which equals the remote head and includes the latest documentation commit. It ran read-only checks only. This is the separate-session PR review the project rules require.
+- **Checks run in that session.** `npm run test:auth` all passed; `npm run test:rls -- --dry-run` lists 18 tests (no live writes); `tsc --noEmit` clean; `npm run lint` clean; `gh pr view 8`: open, mergeable, clean, no CI checks configured; no tracked `.env*` file other than `.env.example`, no `supabase/.temp/`, and no key-like strings in the added lines (the word `service_role` appears only as the database role name and in tests that forbid it).
+- **Result by area.** Authentication (proxy plus `requireUser()`, deny by default, anonymous claims rejected): no issue. RLS (14 owner policies `to authenticated`, cross-user reference checks, column-level grants, `anon` has nothing): no issue. Migration: guard and timeouts present, no data or `auth.*` change. Documentation: consistent with the code (14 policies, 16 dropped policies, route rules). No new finding beyond the accepted fresh-database replay limitation.
+- **Findings (both LOW, non-blocking).**
+  1. `to authenticated` also covers Supabase anonymous sign-ins; documented in the migration and `CLAUDE.md`; the server route check rejects anonymous claims and such a user only reaches their own isolated rows.
+  2. Some evidence is owner-reported or `BLOCKED`: the browser (Safari) two-account checks (S2-R4.x, S2-R6.x), the email-dependent registration flow (email rate limit) and a genuinely expired session (only a fake expired cookie was tested) remain open.
+- **Remaining risks.** The fresh-database replay limitation stays accepted and unresolved; production is not affected. No automated CI runs on the PR. The two-account browser verification (S2-R6) is still to be done.
+- **Limits of this review.** It could not verify live-database results or the owner's manual tests, and did not run `test:rls -- --run`.
