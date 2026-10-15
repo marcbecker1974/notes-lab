@@ -1,12 +1,14 @@
 # Architecture: Notes Lab MVP
 
-Status: **database schema, temporary access policies, `lib/notes-db.ts` and the three-column notes UI are implemented (2026-10-13); the notes UI is on `feature/notes-ui` until its PR is merged.** `REFLECTION.md` records what was verified.
+Status (corrected 2026-10-15): **implemented and merged to `main` (PRs #1 to #6): database schema with colours, temporary anonymous access policies, `lib/notes-db.ts`, the three-column notes UI with count badges and colours, Google and email/password sign-in, post-login navigation to `/notes` and the display-only sign-in status.** `/notes` is still open to anonymous visitors and the data is not per user. The earlier status line ("the notes UI is on `feature/notes-ui` until its PR is merged", 2026-10-13) was out of date. `REFLECTION.md` records what was verified.
+
+**Active scope: Turing Sprint 2** ([PROJECT_BRIEF.md](./PROJECT_BRIEF.md) Part A). Sections 1 to 8 below describe the architecture **as implemented** (the Mid-Sprint design plus Features 5 and 6). Work required by Sprint 2 (server-side protection of `/notes`, per-user ownership and RLS, rich-text editor, Markdown export, image uploads) is **not implemented**; it is described separately, as planned, in section 9 and must not be read as current behaviour.
 
 Related: [PROJECT_BRIEF.md](./PROJECT_BRIEF.md)
 
 ## 1. Guiding principles
 
-- **Simplest thing that works:** reuse the existing Next.js project and Supabase configuration; add no new services.
+- **Simplest thing that works:** reuse the existing Next.js project and Supabase configuration; add no new services. *[Dated note 2026-10-15: this describes the implemented Mid-Sprint architecture. For Sprint 2, Supabase Storage is planned for Feature 10 (section 9.4); it is not implemented.]*
 - **Client-side data layer:** data is loaded once; collection selection, AND tag filtering and live search run in memory.
 - **Notes are not user-protected, but auth-ready:** anonymous access lives only in temporary database policies. The schema and the notes code do not depend on it. Sign-in (Google and email/password) exists separately from notes (section 4a).
 - **One data-access point:** all database access goes through `lib/notes-db.ts`.
@@ -24,7 +26,7 @@ Related: [PROJECT_BRIEF.md](./PROJECT_BRIEF.md)
 | supabase-js (browser client, `lib/supabase/client.ts`) | Data API client | Existing |
 | Supabase PostgreSQL (cloud) | Storage, migrations in `supabase/migrations/` | Existing project; 4 tables applied (migrations `…094205`, `…094206`, `…094208`) |
 
-**Not needed:** a custom backend, Realtime, Storage, Edge Functions, ORM, state-management library, search service, any external service beyond Supabase Auth with the Google provider (Feature 5). The only route handlers are the starter's `/auth/confirm` and the new `/auth/callback`; the starter's other `/auth/*` pages and `/protected` are otherwise unchanged.
+**Not needed:** a custom backend, Realtime, Storage, Edge Functions, ORM, state-management library, search service, any external service beyond Supabase Auth with the Google provider (Feature 5). The only route handlers are the starter's `/auth/confirm` and the new `/auth/callback`; the starter's other `/auth/*` pages and `/protected` are otherwise unchanged. *[Dated note 2026-10-15: this is the implemented architecture. **Current:** Supabase Storage is not implemented and not used. **Planned:** Storage is required for Feature 10 (Image uploads, Sprint 2), see section 9.4. The "not needed" list above is the historical Mid-Sprint statement and is kept.]*
 
 ### Data flow
 
@@ -44,7 +46,7 @@ Three columns, with a shared note-card component:
 
 - **Left sidebar (280px):** a "Notes Lab" header with a blue app icon, a primary blue "New note" button (the notes-list header keeps its own New note button, shown only at medium widths where the sidebar is collapsed), the "All notes" row, a "Collections" section and a "Tags" section. Each section heading has a small "+" button that opens an inline create form (`createCollection`; `createTag`, a standalone tag with no note). "Uncollected" is the first row under Collections, followed by the collections as plain selectable rows (coloured folder icon that opens the colour menu, name, neutral count, delete button overlaying the row on hover). Tags are vertical rows (colour dot that opens the colour menu, name that toggles the filter, neutral usage count). The selected view or active tag has a soft blue background. There is no expand/collapse tree: notes are listed only in the middle column (scope change, see PROJECT_BRIEF R6 and R9).
 - **Colours and counts in the UI (Feature 4 and 3):** collection rows show a coloured folder icon, tag rows a coloured dot, tag badges in the list and editor are soft-coloured, and the list header and editor collection select show the folder colour. Count badges (totals from `countNotes` and `countTagUses` in `lib/notes-view.ts`, memoised on `notes`, independent of tag filter and search) stay neutral gray. Colours change through `components/notes/color-swatch-menu.tsx` (a Radix dropdown with a 4 x 2 swatch grid), always a separate button from the name, so clicking a name keeps its action. `components/notes/sidebar-panel.tsx` holds the responsive wrapper (overlay, backdrop, close button, Escape).
-- **Notes list and editor:** list rows are separated by thin lines with a soft blue selected row (title, two-line preview, tag badges left, date right). The editor header shows the saved/unsaved line and Delete, Cancel (reverts the draft to the last saved text) and Save (the title appears only in the Title field); below it are labelled fields: Title \*, Collection and Tags side by side, and Content \* (a plain-text area; rich text is out of scope), with the existing tags offered only while the Tags field is focused or typed in (arrow keys move into the list, Escape closes it, a click outside closes it), and "Last saved" (from `updatedAt`, shown only when it parses) and the character counter underneath.
+- **Notes list and editor:** list rows are separated by thin lines with a soft blue selected row (title, two-line preview, tag badges left, date right). The editor header shows the saved/unsaved line and Delete, Cancel (reverts the draft to the last saved text) and Save (the title appears only in the Title field); below it are labelled fields: Title \*, Collection and Tags side by side, and Content \* (a plain-text area; rich text is out of scope [dated note 2026-10-15: out of scope in Mid-Sprint; the rich-text editor is now the planned Feature 8, section 9.2, and is not implemented]), with the existing tags offered only while the Tags field is focused or typed in (arrow keys move into the list, Escape closes it, a click outside closes it), and "Last saved" (from `updatedAt`, shown only when it parses) and the character counter underneath.
 - **Middle:** the filtered and searchable notes list (collection selection, AND tag filter and live search combined), rendered with the same note-card component, plus the search box and the empty states.
 - **Right:** the note editor (title, body, collection assignment, tags).
 
@@ -81,7 +83,7 @@ tags (id, name, color, user_id)        collections (… color …) likewise
 - A note belongs to at most one collection; `collection_id` null means uncategorised.
 - Notes and tags are many-to-many through `note_tags`.
 - **AND filter:** a note matches when it has every selected tag (`selected.every(id => note.tagIds.includes(id))`).
-- **Existing:** `public.notes(id, title, body, created_at)`. Its content column stays `body`. It needs `collection_id` and `updated_at` added, plus `user_id`.
+- **Existing:** `public.notes(id, title, body, created_at)`. Its content column stays `body`. It needs `collection_id` and `updated_at` added, plus `user_id`. *[Status corrected 2026-10-15: these columns were added by the applied migrations of PR #1; `user_id` is still nullable.]*
 - **Colours (Feature 4):** `collections.color` and `tags.color` are `text not null default 'slate'` with a CHECK against eight palette keys (`slate, red, amber, green, teal, blue, violet, pink`). The database stores the key, never a hex value. Migration `add_palette_colors` replaced the earlier hex check on `tags.color`, added the collections column and gave existing rows distinct colours (collections blue, green, amber; tags violet, teal, pink, red, by id). No grants or policies changed: the existing temporary update policies cover the new column. `lib/palette.ts` maps each key to full Tailwind class strings (soft 100/800 badge, 500 dot, 600 folder, dark variants) and picks the least-used colour for new items; `lib/notes-db.ts` validates keys (`setCollectionColor`, `setTagColor`, optional colour on create) and maps unknown values to slate. `tailwind.config.ts` scans `lib/` so those class names are generated.
 
 ### Auth-ready ownership design
@@ -104,7 +106,7 @@ tags (id, name, color, user_id)        collections (… color …) likewise
 - **No role or auth references:** no anon checks, no `getUser()` calls, no signed-out branches.
 - **Uniform errors:** each function returns data or throws a typed `NotesDbError` with a user-safe message, so raw Postgres messages stay out of the UI.
 
-Planned API:
+Planned API: *[dated note 2026-10-15: the heading is from the design phase; these functions are implemented in `lib/notes-db.ts`, including `createTag`, `setCollectionColor` and `setTagColor`; collection rename and tag deletion are not.]*
 
 | Area | Functions |
 |---|---|
@@ -137,14 +139,14 @@ Planned API:
 - No audit trail and no attribution of rows.
 - **"Localhost only" limits the app, not the database.** The Supabase Data API is on the internet, so anyone who obtains the project URL and key can call it from anywhere. Mass deletion, defacement and filling the database with rows are all possible and are accepted risks; the key is also readable by anyone who can load the app's pages.
 - `npm run dev` binds to `127.0.0.1` only (`next dev -H 127.0.0.1`). The default binds to all interfaces and prints a LAN "Network" URL, which would let other devices on the same network load the page and read the key. This was confirmed by running the default `next dev` during the PR review.
-- This is acceptable **only** for localhost development with non-sensitive data. Deploying, sharing the key or publishing it would turn it into a real exposure.
+- This is acceptable **only** for localhost development with non-sensitive data. *[Dated note 2026-10-15: "localhost" here means the local machine; the project's required origin is `http://127.0.0.1:3000`, never the hostname `localhost` (see section 4a).]* Deploying, sharing the key or publishing it would turn it into a real exposure.
 - **Kill switch:** a new migration that drops the `TEMP anon` policies and runs `revoke all` on the four tables from `anon` and `authenticated`. The app then becomes fully closed until owner policies exist.
 - Lists in `notes-db.ts` are not paged. The Data API's row cap (default 1000, project setting not checked) would silently truncate them, so keep the sample data small or add paging before the data grows.
 
 ### Rules while anonymous access is on
 
 - Use only generic, non-sensitive sample data (for example "Prompt engineering basics", "What is RAG?"). No real personal notes, names or credentials.
-- Keep seed data in its own file or migration so it is easy to remove. The existing seed rows (Shopping list, Meeting notes, Ideas) are harmless but should be replaced with journal-themed samples.
+- Keep seed data in its own file or migration so it is easy to remove. The existing seed rows (Shopping list, Meeting notes, Ideas) are harmless but should be replaced with journal-themed samples. *[Dated note 2026-10-15: the journal-themed sample data was applied through the PR #1 migrations; its fate is an open decision for Feature 7 (PROJECT_BRIEF A10).]*
 - Show a small "Demo mode: data is publicly accessible, don't store private notes" banner, implemented as a single constant that is easy to delete.
 - Keep `.env.local` out of Git (already covered by `.env*.local` in `.gitignore`), never put a service-role or secret key in the project, and add `supabase/.temp/` to `.gitignore` before committing.
 
@@ -213,17 +215,17 @@ How this architecture supports the 12 course requirements (R) and the evaluation
 | R3 | `collections(id, name, created_at, user_id)` | Supported; the extra `user_id` stays nullable (decided). |
 | R4 | `notes.collection_id`, nullable FK, `ON DELETE SET NULL` | Supported. |
 | R5 | `tags` and `note_tags` with composite PK | Supported. |
-| R6 | `listNotes` plus `listCollections`, grouped in memory; "Uncollected" is `collection_id is null` | Supported. UI split decided: sidebar tree with notes, middle filtered list, shared note card. |
+| R6 | `listNotes` plus `listCollections`, grouped in memory; "Uncollected" is `collection_id is null` | Supported. UI split decided: sidebar tree with notes, middle filtered list, shared note card. *[Superseded by the Feature 4 scope change: the sidebar is a flat list and notes are listed only in the middle column, see section 2.]* |
 | R7 | `createCollection` | Supported. |
 | R8 | `setNoteCollection` | Supported. |
 | R9 | `addTagToNote`, `removeTagFromNote`, tag objects resolved from `listTags` for the cards | Supported. |
 | R10 | In-memory AND filter over each note's tag ids | Supported. |
 | R11 | In-memory search over title and body combined with the tag filter | Supported. |
 | R12 | Derived from the same in-memory filters | Supported; the UI must distinguish empty collection, no search results and no tag match. |
-| E1–E4 | Existing project (App Router, TypeScript, Tailwind, supabase-js, no auth, local only) | Supported. See the version note below. |
-| E5 | Migrations in `supabase/migrations/` | Supported once the schema migrations are written. |
+| E1–E4 | Existing project (App Router, TypeScript, Tailwind, supabase-js, no auth, local only) | Supported. See the version note below. *[Mid-Sprint wording: "no auth" is superseded by Sprint 2 and by Features 5 and 6 (section 4a); notes themselves are still not protected by user.]* |
+| E5 | Migrations in `supabase/migrations/` | Supported once the schema migrations are written. *[Dated note 2026-10-15: written and applied (12 migrations, PRs #1 and #4); see section 5.]* |
 | Optional: count badges | Counts derived in memory from the loaded notes, so they update instantly on create, move and delete, with an "Uncollected" count | Supported; no extra queries or schema. |
-| E6–E9, E12, E13 | Git and PR workflow (PROJECT_BRIEF section 8) | Process, not architecture. No Git remote is configured yet (approval needed before the first PR). |
+| E6–E9, E12, E13 | Git and PR workflow (PROJECT_BRIEF section 8) | Process, not architecture. No Git remote is configured yet (approval needed before the first PR). *[Status corrected 2026-10-15: the remote `origin` is `https://github.com/marcbecker1974/notes-lab` and PRs #1 to #6 are merged. It is the development repository; the final Turing submission location is pending.]* |
 | E10 | `CLAUDE.md` with the Supabase conventions and database access rules | Supported: `CLAUDE.md` created with the rules; keep it updated. |
 | E11 | Cited reference in `docs/` | Supported: `docs/SUPABASE_REFERENCES.md` has source URLs at the top. |
 
@@ -243,3 +245,37 @@ How this architecture supports the 12 course requirements (R) and the evaluation
 | PostgREST embedding for joins; counts computed in memory | No extra queries needed for note count badges | None at this scale |
 
 Dependencies (existing in `package.json`): Next.js (`latest`, uses the `proxy.ts` convention; **read `node_modules/next/dist/docs/` before writing code**, per `AGENTS.md`), React 19, TypeScript, Tailwind CSS 3.x, `@supabase/supabase-js` and `@supabase/ssr` (`latest`), and shadcn/ui primitives in `components/ui`. **UI library (decided): shadcn/ui + Tailwind CSS**, no other UI library. The notes UI added five Radix packages (`@radix-ui/react-alert-dialog`, `-collapsible`, `-scroll-area`, `-select`, `-separator`); the components were written in the repo's existing style against `@/lib/utils`. Everything else adds no new dependencies.
+
+## 9. Planned architecture for Sprint 2 (NOT IMPLEMENTED)
+
+Everything in this section is a **plan** for the features in the [PROJECT_BRIEF.md](./PROJECT_BRIEF.md) Part A roadmap. None of it exists in the code or the database today. Each feature gets its own architecture assessment before development; statements about Supabase behaviour below must be checked against the official documentation and added to `docs/SUPABASE_REFERENCES.md` when relied on. Written 2026-10-15; no verification of these plans has been done.
+
+### 9.1 Feature 7: server-side route protection and per-user ownership
+
+- **Route protection.** Remove the `/notes` exemption in `lib/supabase/proxy.ts` so a signed-out request is redirected to `/auth/login`. The proxy already verifies the session with `getClaims()` for every matched request. Whether the proxy check alone is enough, or whether the `/notes` page should also verify the user in a Server Component, is an open design decision (`CLAUDE.md`: never rely solely on client-side session state). `components/notes/auth-status.tsx` stays display-only; its Login link and the demo banner no longer apply once `/notes` is private.
+- **Ownership.** `user_id` becomes `not null default auth.uid()` on `notes`, `collections`, `tags` after a **reviewed, approved** backfill (existing data plan: PROJECT_BRIEF A10; the section 6 steps and checklist stay the technical outline). Existing rows are not assigned automatically.
+- **Policies.** Owner policies `to authenticated` with `(select auth.uid()) = user_id` (and `with check`), one per operation and table; `note_tags` checks the parent note and the tag. Drop the 16 `TEMP anon …` policies and the anon and `authenticated` TEMP grants in the same migration that adds owner policies, and keep every table's `revoke all` rule. Cross-owner references (`note_tags`, `notes.collection_id`) need checks on both parents, plus tests.
+- **Unchanged by design.** `lib/notes-db.ts` keeps not reading or writing `user_id` and not containing role logic (the database default and RLS do the work). Google and email/password sign-in both continue to work; accounts are not merged on a matching email (PROJECT_BRIEF A11, an assumption about Supabase's default linking still to be checked).
+- **Uniqueness.** The unique name indexes are already `(user_id, lower(btrim(name)))`, so two users may use the same tag or collection name once `user_id` is set; to be tested.
+
+### 9.2 Feature 8: rich-text editor (additional product requirement)
+
+- **Open decisions:** the editor library (an established, maintained one, none chosen, none installed), the content storage format, the heading levels and list controls (the mockup in `docs/design/` shows a toolbar but does not specify them), whether the code and full-screen buttons are required.
+- **Data model impact:** `notes.body` is plain text with the check constraint `notes_body_length` (20,000 characters); a rich format is larger than its text, so the constraint and the format need a decision and a new migration (applied migrations are never edited). Existing plain-text notes must be preserved or safely migrated.
+- **Search.** The in-memory search (`lib/notes-view.ts`) matches `title` and `body`; with rich content it needs a plain-text projection of the body.
+- **Safe rendering.** User-generated content must not execute HTML or script; the approach (sanitising, or rendering from a structured document) is part of the library and format decision.
+- **Mobile.** The editor is unreachable below 768px (see section 2); whether the fix is part of this feature is an open scope decision.
+
+### 9.3 Feature 9: Markdown export
+
+- Export the **selected note** as a `.md` file generated for the signed-in user from the note data the user can already read (so existing RLS limits what can be exported). The conversion depends on the Feature 8 storage format; before that format exists only plain-text notes can be exported. Image references need a defined representation (Feature 10). Feature 9 uses Workflow B: normal feature planning and approval; it reads only note data the user can already read, so it does not automatically need the security assessment of a database or Storage change.
+
+### 9.4 Feature 10: image uploads with Supabase Storage
+
+- Images are stored as files in Supabase Storage, never as base64 in PostgreSQL. Private access (a private bucket, a per-user path or ownership record, policies on `storage.objects` for `authenticated`) is the intended direction; the details (bucket and policy design, how a note references an image, orphan and deletion handling, signed URLs or authenticated reads) are open and must be assessed before building.
+- Per-user paths need the user id, which `lib/notes-db.ts` never touches: Storage access may use a separate dedicated module, subject to an approved architecture decision (`CLAUDE.md`, Database access rules); access to the existing tables stays in `lib/notes-db.ts`. Feature 10 (Workflow A) is selected and approved for planning only. It needs an architecture and security assessment in which the bucket configuration and the `storage.objects` access policies are reviewed explicitly. Creating buckets, changing Storage policies, installing dependencies, running migrations and changing Supabase configuration follow the existing workflow (assessment, then approval, then implementation). Schema and policy changes use version-controlled migrations where supported; an approved Supabase dashboard change is documented when a migration is not applicable. Any new table or policy follows the Supabase conventions in `CLAUDE.md`, and new dependencies and services still need explicit approval.
+- **Current vs planned:** Storage is **not implemented** today; this subsection describes what Feature 10 is expected to need.
+
+### 9.5 Not planned for Sprint 2
+
+Account linking (FUT-1), deployment, public sharing, AI features.
