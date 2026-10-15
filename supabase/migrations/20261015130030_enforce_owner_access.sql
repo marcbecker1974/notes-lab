@@ -26,9 +26,6 @@
 set local lock_timeout = '5s';
 set local statement_timeout = '30s';
 
--- Keep writers out while the guard and the changes run (the ALTERs need this anyway).
-lock table public.notes, public.collections, public.tags, public.note_tags in share mode;
-
 -- 1. Guard: nothing may be unowned or reference another owner's rows.
 do $$
 begin
