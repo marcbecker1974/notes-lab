@@ -10,6 +10,6 @@ export function downloadNoteAsMarkdown(note: { title: string; body: string }): v
   document.body.appendChild(link);
   link.click();
   link.remove();
-  // Revoke after the click has been handled, so the download is not cancelled.
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  // Revoke later, not at once: some browsers start the download asynchronously.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }

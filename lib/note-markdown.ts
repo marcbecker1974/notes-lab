@@ -8,13 +8,13 @@
 
 type ExportableNote = { title: string; body: string };
 
-const FILENAME_MAX = 80; // characters, before the extension
+const FILENAME_MAX_BYTES = 200; // UTF-8 bytes before the extension (file systems allow 255)
 const FALLBACK_NAME = "note";
 // Characters not allowed in file names on common systems, control characters, and
 // invisible or direction-changing characters that can disguise a name.
 const UNSAFE = /[\\/:*?"<>|\u0000-\u001f\u007f​-‏‪-‮⁦-⁩﻿]/g;
 // Windows reserves these names with any extension too (CON.txt.md is still CON).
-const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³]|conin\$|conout\$)$/i;
 
 const lineBreaks = (text: string) => text.replace(/\r\n?/g, "\n");
 
@@ -32,7 +32,16 @@ export function markdownFilename(title: string): string {
     .replace(UNSAFE, "-")
     .replace(/\s+/g, " ")
     .trim();
-  name = Array.from(name).slice(0, FILENAME_MAX).join("");
+  // Shorten by whole characters until the UTF-8 size fits (an emoji takes 4 bytes).
+  const encoder = new TextEncoder();
+  let bytes = 0;
+  let shortened = "";
+  for (const char of name) {
+    bytes += encoder.encode(char).length;
+    if (bytes > FILENAME_MAX_BYTES) break;
+    shortened += char;
+  }
+  name = shortened;
   // No leading or trailing dots, spaces or hyphens (hidden files, Windows trimming).
   name = name.replace(/^[.\s-]+|[.\s-]+$/g, "");
   if (name === "") name = FALLBACK_NAME;

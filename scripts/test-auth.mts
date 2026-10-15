@@ -984,9 +984,15 @@ await test("export: Windows reserved names are prefixed, long titles are shorten
   assert.equal(markdownFilename("con.report"), "_con.report.md");
   assert.equal(markdownFilename("console"), "console.md");
   const long = markdownFilename("x".repeat(500));
-  assert.equal(long, `${"x".repeat(80)}.md`);
+  assert.equal(long, `${"x".repeat(200)}.md`);
   // shortened by characters, not UTF-16 units: no split emoji
-  assert.equal(Array.from(markdownFilename("🚀".repeat(200)).slice(0, -3)).length, 80);
+  // the limit is in UTF-8 bytes (file systems allow 255), so 4-byte emoji stay under it
+  const emoji = markdownFilename("🚀".repeat(200));
+  assert.ok(new TextEncoder().encode(emoji).length <= 255, "emoji name within 255 bytes");
+  assert.equal(Array.from(emoji.slice(0, -3)).length, 50);
+  assert.ok(new TextEncoder().encode(markdownFilename("日".repeat(500))).length <= 255);
+  assert.equal(markdownFilename("COM¹"), "_COM¹.md");
+  assert.equal(markdownFilename("CONIN$"), "_CONIN$.md");
 });
 
 await test("export: the module is pure, the download is client-side and the database layer is untouched", () => {
