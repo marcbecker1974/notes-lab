@@ -13,7 +13,7 @@ import {
   createLatestGate,
   identityAfterCheck,
 } from "../lib/auth/latest.ts";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import {
   LOGIN_PATH,
   hasVerifiedUser,
@@ -858,8 +858,8 @@ await test("isolation test 11: 428C9 only for identity-column cases, every attem
     assert.ok(block.includes(`"${f}"`), f);
 });
 
-await test("test-tag cleanup script: inert by default, atomic, exactly tags 114 and 115, never touches accounts", () => {
-  const c = sqlCode(src("supabase/maintenance/cleanup_test_tags.sql"));
+await test("Feature 7 test-data cleanup script: inert by default, atomic, exactly the approved scope, never touches accounts", () => {
+  const c = sqlCode(src("supabase/maintenance/cleanup_feature7_test_data.sql"));
   assert.ok(
     /v_approved constant boolean := false;/.test(c),
     "the committed script must be inert",
@@ -870,23 +870,62 @@ await test("test-tag cleanup script: inert by default, atomic, exactly tags 114 
     1,
     "one DO statement = atomic",
   );
-  const deletes = c.match(/delete from[\s\S]*?;/g) ?? [];
-  assert.equal(deletes.length, 1);
-  assert.ok(
-    /delete from public\.tags where id in \(114, 115\);/.test(deletes[0]),
-    "only the two approved ids",
+  const deletes = (c.match(/delete from[\s\S]*?;/g) ?? []).map((d) =>
+    d.replace(/\s+/g, " "),
   );
-  assert.ok(/[0-9a-f]{32}/.test(c), "the fingerprint guard is present");
-  assert.ok(
-    /note_tags where tag_id in \(114, 115\)/.test(c),
-    "unused tags only",
+  assert.deepEqual(deletes, [
+    "delete from public.note_tags where (note_id, tag_id) in ((300, 118), (300, 119));",
+    "delete from public.notes where id in (300, 301, 302);",
+    "delete from public.collections where id = 109;",
+    "delete from public.tags where id in (114, 115, 118, 119);",
+  ]);
+  assert.equal(
+    (c.match(/'[0-9a-f]{32}'/g) ?? []).length,
+    4,
+    "one fingerprint per table",
   );
-  assert.ok(/provider\W+= 'email'/.test(c), "never the Google journal account");
-  for (const m of c.matchAll(/auth\.\w+/g)) assert.equal(m[0], "auth.users");
   assert.ok(
-    !/(insert|update)[^;]*(auth\.|public\.tags)/i.test(c),
-    "no writes besides the one delete",
+    /provider'\s*=\s*'google'/.test(c) && /provider'\s*=\s*'email'/.test(c),
+    "owners are checked by provider",
   );
+  for (const m of c.matchAll(/auth\.\w+/g))
+    assert.ok(["auth.users", "auth.identities"].includes(m[0]), m[0]);
+  assert.ok(
+    /v_identities_after <> v_identities_before/.test(c),
+    "the accounts must be unchanged",
+  );
+  assert.ok(
+    !/(insert|update)[^;]*(auth\.|public\.)/i.test(c),
+    "no writes besides the four deletes",
+  );
+  assert.ok(
+    !existsSync(
+      new URL("../supabase/maintenance/cleanup_test_tags.sql", import.meta.url),
+    ),
+    "the overlapping tags-only script is gone",
+  );
+});
+
+await test("the obsolete demo-mode banner is gone (the data is private since the owner-access migration)", () => {
+  assert.ok(
+    !existsSync(
+      new URL("../components/notes/demo-banner.tsx", import.meta.url),
+    ),
+    "demo-banner.tsx must not exist",
+  );
+  for (const f of [
+    "components/notes/notes-app.tsx",
+    "components/notes/top-bar.tsx",
+    "components/notes/sidebar.tsx",
+    "components/notes/sidebar-panel.tsx",
+    "app/notes/page.tsx",
+  ]) {
+    const code = src(f);
+    assert.ok(
+      !/DemoBanner|demo-banner|DEMO_NOTICE|publicly accessible/i.test(code),
+      f,
+    );
+  }
 });
 
 if (failed) {

@@ -19,7 +19,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { createSessionLossGate } from "@/lib/auth/session-loss";
 import { NotesDbError, type Collection, type Note } from "@/lib/notes-db";
 import { filterNotes, type View } from "@/lib/notes-view";
-import { DemoBanner } from "./demo-banner";
 import { NoteEditor, type Draft } from "./note-editor";
 import { NotesList } from "./notes-list";
 import { SidebarPanel } from "./sidebar-panel";
@@ -225,7 +224,6 @@ export function NotesApp() {
   if (data.status === "loading") {
     return (
       <div className="flex h-screen flex-col">
-        <DemoBanner />
         <div className="grid min-h-0 flex-1 gap-0 md:grid-cols-[280px_420px_1fr]" aria-busy="true">
           {[0, 1, 2].map((i) => (
             <div key={i} className="space-y-3 border-r p-4">
@@ -242,7 +240,6 @@ export function NotesApp() {
   if (data.status === "error") {
     return (
       <div className="flex h-screen flex-col">
-        <DemoBanner />
         <div className="mx-auto mt-16 max-w-md space-y-3 px-4">
           <Alert variant="destructive">
             <AlertDescription>{data.loadError}</AlertDescription>
@@ -270,7 +267,6 @@ export function NotesApp() {
 
   return (
     <div className="flex h-screen flex-col bg-app">
-      <DemoBanner />
       {error && (
         <Alert variant="destructive" className="rounded-none border-x-0 border-t-0">
           <AlertDescription className="flex items-center justify-between gap-2">
