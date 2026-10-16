@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { backAction, visiblePane } from "../lib/notes-mobile.ts";
+import { createBackGuard, makeInert, nextFocusIndex, type BackGuardHost } from "../lib/back-guard.ts";
 
 const read = (path: string) => readFileSync(path, "utf8");
 let failed = 0;
@@ -104,6 +105,115 @@ test("no clipping on narrow screens: smaller editor padding, dynamic viewport he
   assert.ok(!app.includes("h-screen") && app.includes("h-dvh"));
   assert.ok(read("components/notes/editor-toolbar.tsx").includes("flex flex-wrap"));
   assert.ok(read("components/notes/markdown-preview.tsx").includes("md-table-wrap"), "wide tables scroll sideways inside their own box");
+});
+
+
+// --- system Back with unsaved changes (lib/back-guard.ts)
+function fakeHistory(length = 5) {
+  const calls: string[] = [];
+  const timers: Array<() => void> = [];
+  const host: BackGuardHost = {
+    push: () => void calls.push("push"),
+    back: () => void calls.push("back"),
+    go: (n) => void calls.push(`go${n}`),
+    length: () => length,
+    later: (fn) => void timers.push(fn),
+  };
+  return { host, calls, timers };
+}
+test("back guard: nothing unsaved means no history entry and Back is untouched", () => {
+  const { host, calls } = fakeHistory();
+  const guard = createBackGuard(host);
+  guard.setActive(false);
+  assert.deepEqual(calls, []);
+  assert.equal(guard.onPopState(), "none", "a normal Back is not blocked");
+});
+test("back guard: unsaved changes push one entry; Back is blocked and the entry is put back", () => {
+  const { host, calls } = fakeHistory();
+  const guard = createBackGuard(host);
+  guard.setActive(true);
+  guard.setActive(true);
+  assert.deepEqual(calls, ["push"], "one entry, however often it is set");
+  assert.equal(guard.onPopState(), "blocked");
+  assert.deepEqual(calls, ["push", "push"], "the popped entry is pushed again: the page stays");
+  assert.equal(guard.onPopState(), "blocked", "and again for every Back until the user decides");
+});
+test("back guard: saving or cancelling the edits drops the entry without treating it as a user Back", () => {
+  const { host, calls } = fakeHistory();
+  const guard = createBackGuard(host);
+  guard.setActive(true);
+  guard.setActive(false);
+  assert.deepEqual(calls, ["push", "back"]);
+  assert.equal(guard.onPopState(), "ignored", "the event caused by our own back()");
+  assert.equal(guard.onPopState(), "none", "the next real Back is not swallowed");
+});
+test("back guard: Save or Discard continues the Back past both entries", () => {
+  const { host, calls } = fakeHistory();
+  const guard = createBackGuard(host);
+  guard.setActive(true);
+  guard.onPopState();
+  guard.leave();
+  assert.equal(calls.at(-1), "go-2");
+  assert.equal(guard.onPopState(), "ignored");
+  guard.setActive(false);
+  assert.equal(calls.filter((c) => c === "back").length, 0, "no second back() after leaving");
+});
+test("back guard: with no earlier entry (new tab) leave only removes our entry, nothing is left armed or stale", () => {
+  const { host, calls } = fakeHistory(2);
+  const guard = createBackGuard(host);
+  guard.setActive(true);
+  guard.onPopState();
+  guard.leave();
+  assert.equal(calls.at(-1), "back", "go(-2) would be a silent no-op");
+  assert.equal(calls.some((c) => c === "go-2"), false);
+  assert.equal(guard.onPopState(), "ignored");
+  assert.equal(guard.hasEntry, false);
+  guard.setActive(false);
+  assert.equal(guard.onPopState(), "none", "a later Back is a normal Back");
+});
+test("back guard: a missed event does not swallow a later Back (timeout resets the counter)", () => {
+  const { host, timers } = fakeHistory();
+  const guard = createBackGuard(host);
+  guard.setActive(true);
+  guard.setActive(false);
+  timers.forEach((t) => t());
+  assert.equal(guard.onPopState(), "none");
+});
+test("back guard: wired to the unsaved state, the dialog and the page (static)", () => {
+  assert.ok(/useBackGuard\(dirty,/.test(app), "active exactly while dirty");
+  assert.ok(/const leavePage = useBackGuard\([\s\S]*?kind: "navigate",[\s\S]*?leavePage\(\);/.test(app), "a blocked Back opens the Save / Discard / Cancel dialog");
+  const hook = read("components/notes/use-back-guard.ts");
+  assert.ok(hook.includes('addEventListener("popstate"') && hook.includes("history.pushState(null"));
+  assert.ok(app.includes("beforeunload"), "reload and tab close keep their own protection");
+  assert.ok(/proceed: \(choice\) => \{\s*if \(choice === "discard" && selectedNote\)/.test(app), "Discard resets the draft before leaving");
+  assert.ok(/if \(!leavingRef\.current\) event\.preventDefault\(\)/.test(app) && app.includes("leavingRef.current = true"), "no second 'Leave site?' prompt after the user chose");
+});
+
+// --- drawer: focus, trap, inert background
+test("drawer focus: Tab wraps inside the drawer in both directions", () => {
+  assert.equal(nextFocusIndex(4, 3, false), 0);
+  assert.equal(nextFocusIndex(4, 0, true), 3);
+  assert.equal(nextFocusIndex(4, 1, false), 2);
+  assert.equal(nextFocusIndex(4, -1, false), 0, "focus outside: enter at the first control");
+  assert.equal(nextFocusIndex(4, -1, true), 3);
+  assert.equal(nextFocusIndex(0, -1, false), -1, "nothing focusable: leave Tab alone");
+});
+test("drawer: the background is inert while open and restored exactly afterwards", () => {
+  const a = { inert: false };
+  const b = { inert: true }; // already inert before: stays inert afterwards
+  const restore = makeInert([a, b]);
+  assert.deepEqual([a.inert, b.inert], [true, true]);
+  restore();
+  assert.deepEqual([a.inert, b.inert], [false, true]);
+});
+test("drawer (static): modal only as a drawer, focus in and out, Escape, trap, backdrop outside the inert area", () => {
+  assert.ok(panel.includes('role={modal ? "dialog" : undefined}') && panel.includes("aria-modal={modal ? true : undefined}"));
+  assert.ok(panel.includes('matchMedia("(max-width: 1199px)")'), "not modal on wide desktop");
+  assert.ok(panel.includes("makeInert(") && panel.includes("child !== backdropRef.current"));
+  assert.ok(panel.includes('event.key !== "Tab"') && panel.includes("nextFocusIndex("));
+  assert.ok(panel.includes('event.key === "Escape"'));
+  assert.ok(panel.includes("closeRef.current?.focus()") && panel.includes('[aria-controls="collections-panel"]'));
+  assert.ok(/if \(!open \|\| suspendEscape\) return;/.test(panel), "a dialog opened from the drawer keeps its own Escape and Tab");
 });
 
 // --- desktop regression (static)

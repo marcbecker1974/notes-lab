@@ -35,6 +35,7 @@ import { NoteEditor, type Draft } from "./note-editor";
 import { NotesList } from "./notes-list";
 import { SidebarPanel } from "./sidebar-panel";
 import { TopBar } from "./top-bar";
+import { useBackGuard } from "./use-back-guard";
 import { useNotesData } from "./use-notes-data";
 
 type Pending =
@@ -96,10 +97,31 @@ export function NotesApp() {
     activeDraft !== null &&
     (activeDraft.title !== selectedNote.title || activeDraft.body !== selectedNote.body);
 
-  // Reload, tab close and Back would silently drop unsaved edits; ask the browser to confirm.
+  // Browser Back (the phone's system gesture too) with unsaved edits asks first; the page stays
+  // until the user chooses (lib/back-guard.ts). Reload and tab close use beforeunload below.
+  // Once the user chose Save or Discard the browser's own "Leave site?" prompt would only repeat
+  // the question, so it is switched off for the short time the page needs to go.
+  const leavingRef = useRef(false);
+  const leavePage = useBackGuard(dirty, () =>
+    setPending({
+      kind: "navigate",
+      proceed: (choice) => {
+        if (choice === "discard" && selectedNote) {
+          setDraft({ title: selectedNote.title, body: selectedNote.body });
+        }
+        leavingRef.current = true;
+        window.setTimeout(() => (leavingRef.current = false), 2000);
+        leavePage();
+      },
+    }),
+  );
+
+  // Reload and tab close would silently drop unsaved edits; ask the browser to confirm.
   useEffect(() => {
     if (!dirty) return;
-    const onBeforeUnload = (event: BeforeUnloadEvent) => event.preventDefault();
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!leavingRef.current) event.preventDefault();
+    };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [dirty]);
