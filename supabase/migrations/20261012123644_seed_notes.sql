@@ -1,4 +1,9 @@
-insert into public.notes (title, body) values
-  ('Shopping list', 'Milk, eggs, bread'),
-  ('Meeting notes', 'Discussed Q2 priorities'),
-  ('Ideas', 'Redesign the onboarding flow');
+-- Historical demo data removed on purpose (Git history keeps the original statements).
+--
+-- This migration used to insert three demo notes ('Shopping list', 'Meeting notes',
+-- 'Ideas') while the app had no sign-in. Those rows had no owner, and the final
+-- ownership migration (20261015130030_enforce_owner_access.sql) refuses to run while
+-- any row has no owner, so a fresh database could not be rebuilt from the migrations.
+-- The file stays so the migration versions and their order are unchanged.
+--
+-- Nothing else in the migration history depends on these rows.

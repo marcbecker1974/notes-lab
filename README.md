@@ -81,7 +81,7 @@ Only the publishable key is used. Never add a service-role or secret key to this
 - **Authentication → Providers:** email/password is available by default (decide whether "Confirm email" is required). For Google sign-in, enable the Google provider with your own OAuth client ID and secret, entered only in the Supabase dashboard.
 - **Email:** confirmation and reset emails are sent by Supabase and are subject to its email limits.
 
-**Existing project or a new one?** The app runs as-is against a Supabase project that already has the tables, policies and grants. The repository contains the SQL migration history in `supabase/migrations/`, but installing it on a fresh database has not been fully verified (see [Known limitations](#known-limitations)).
+**Existing project or a new one?** The app runs as-is against a Supabase project that already has the tables, policies and grants. The repository contains the SQL migration history in `supabase/migrations/`. The early demo-data seeds that would have blocked the final ownership migration have been removed from it, but a full replay on an empty database has not been executed yet (see [Known limitations](#known-limitations)).
 
 ## Database & security
 
@@ -117,7 +117,7 @@ The offline suites, the type check, ESLint and the production build passed on th
 
 - Complex Markdown (tables, images, task lists, raw HTML, YAML front matter) cannot be edited safely in the Visual editor. Such notes open in Preview and are edited in Source mode.
 - Notes Lab is built for local use; it has not been deployed publicly. Image uploads are not implemented.
-- A fresh-database install from `supabase/migrations/` is unverified and has a known unresolved issue: earlier migrations create demo records without an owner, while the final ownership migration refuses to proceed when unowned records remain. Those records must be removed first.
+- Installing the schema on a fresh Supabase project from `supabase/migrations/` is verified by reading the SQL only, not by an actual replay. Earlier migrations used to insert demo records without an owner, which the final ownership migration refuses; those inserts have been removed, so no owner-less data is created any more.
 - There is no browser-automation suite; layout and touch behaviour were checked manually.
 - On a phone, browser Back with unsaved changes asks first, but after Save or Discard it leaves the page rather than returning to the list.
 
