@@ -473,7 +473,7 @@ await test("a public prefix cannot be used to reach /notes (dot-segments, encodi
 });
 await test("hasVerifiedUser accepts only real signed-in claims", () => {
   assert.equal(
-    hasVerifiedUser({ sub: "921d5ba0-e423-473d-a013-0934e626dc49" }),
+    hasVerifiedUser({ sub: "00000000-0000-4000-8000-000000000001" }),
     true,
   );
   assert.equal(
