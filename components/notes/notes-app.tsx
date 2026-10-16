@@ -18,7 +18,15 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { createSessionLossGate } from "@/lib/auth/session-loss";
 import { NotesDbError, type Collection, type Note } from "@/lib/notes-db";
-import { filterNotes, type View } from "@/lib/notes-view";
+import {
+  DEFAULT_NOTE_SORT,
+  filterNotes,
+  loadNoteSort,
+  orderNotes,
+  saveNoteSort,
+  type NoteSort,
+  type View,
+} from "@/lib/notes-view";
 import { downloadNoteAsMarkdown } from "./download-markdown";
 import { NoteEditor, type Draft } from "./note-editor";
 import { NotesList } from "./notes-list";
@@ -49,6 +57,13 @@ export function NotesApp() {
   const [viewState, setView] = useState<View>({ kind: "all" });
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [query, setQuery] = useState("");
+  // Read after mount so the server and first client render agree (default order).
+  const [sort, setSort] = useState<NoteSort>(DEFAULT_NOTE_SORT);
+  useEffect(() => setSort(loadNoteSort(window.localStorage)), []);
+  const changeSort = useCallback((next: NoteSort) => {
+    setSort(next);
+    saveNoteSort(window.localStorage, next);
+  }, []);
   const [selectedNoteId, setSelectedNoteId] = useState<number | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
@@ -84,10 +99,11 @@ export function NotesApp() {
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [dirty]);
 
-  const { notes: visibleNotes, empty } = useMemo(
+  const { notes: filteredNotes, empty } = useMemo(
     () => filterNotes(notes, view, selectedTagIds, query),
     [notes, view, selectedTagIds, query],
   );
+  const visibleNotes = useMemo(() => orderNotes(filteredNotes, sort), [filteredNotes, sort]);
 
   // Runs a database action; on failure shows the message (and re-syncs if a row vanished).
   const attempt = useCallback(
@@ -326,6 +342,8 @@ export function NotesApp() {
               selectedNoteId={selectedNoteId}
               query={query}
               filtersActive={selectedTagIds.length > 0}
+              sort={sort}
+              onSortChange={changeSort}
               onSelectNote={selectNote}
               onClearFilters={clearFilters}
             />

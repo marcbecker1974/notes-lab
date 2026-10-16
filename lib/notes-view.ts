@@ -114,3 +114,60 @@ export function filterNotes(
   if (found.length === 0) return { notes: [], empty: "no-search-match" };
   return { notes: found, empty: null };
 }
+
+// --- Ordering of the note list (Feature 8.2). Display only; nothing is stored in the database.
+
+export const NOTE_SORTS = ["title-asc", "title-desc", "modified-desc", "modified-asc"] as const;
+export type NoteSort = (typeof NOTE_SORTS)[number];
+export const DEFAULT_NOTE_SORT: NoteSort = "title-asc";
+export const NOTE_SORT_LABELS: Record<NoteSort, string> = {
+  "title-asc": "Title A\u2013Z / 0\u20139",
+  "title-desc": "Title Z\u2013A / 9\u20130",
+  "modified-desc": "Last modified: newest first",
+  "modified-asc": "Last modified: oldest first",
+};
+export const NOTE_SORT_STORAGE_KEY = "notes-lab:note-sort";
+
+// Natural order: digit runs compare as numbers (Chapter 2 before Chapter 10; 00 to 08 in order).
+const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+
+/** A copy of `notes` in the chosen order; ties fall back to the id so the order is stable. */
+export function orderNotes(notes: Note[], sort: NoteSort): Note[] {
+  const byTitle = (a: Note, b: Note) => collator.compare(a.title, b.title) || a.id - b.id;
+  const byDate = (a: Note, b: Note) => Date.parse(a.updatedAt) - Date.parse(b.updatedAt);
+  return [...notes].sort((a, b) => {
+    switch (sort) {
+      case "title-asc":
+        return byTitle(a, b);
+      case "title-desc":
+        return -collator.compare(a.title, b.title) || a.id - b.id;
+      case "modified-desc":
+        return byDate(b, a) || b.id - a.id;
+      case "modified-asc":
+        return byDate(a, b) || a.id - b.id;
+    }
+  });
+}
+
+export const isNoteSort = (value: unknown): value is NoteSort =>
+  typeof value === "string" && (NOTE_SORTS as readonly string[]).includes(value);
+
+type SortStorage = Pick<Storage, "getItem" | "setItem">;
+
+/** The saved choice, or the default when nothing valid is saved or storage is unavailable. */
+export function loadNoteSort(storage: SortStorage | null | undefined): NoteSort {
+  try {
+    const raw = storage?.getItem(NOTE_SORT_STORAGE_KEY);
+    return isNoteSort(raw) ? raw : DEFAULT_NOTE_SORT;
+  } catch {
+    return DEFAULT_NOTE_SORT;
+  }
+}
+
+export function saveNoteSort(storage: SortStorage | null | undefined, sort: NoteSort): void {
+  try {
+    storage?.setItem(NOTE_SORT_STORAGE_KEY, sort);
+  } catch {
+    // private mode or blocked storage: the choice just lasts for this visit
+  }
+}

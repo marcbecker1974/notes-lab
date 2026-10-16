@@ -57,6 +57,11 @@ function cleanMarkdown(text: string): string {
  * with a pipe is prose, as before. Display only: the stored Markdown is never changed.
  */
 export function plainTextPreview(body: string): string {
+  return previewParts(body).text;
+}
+
+/** The preview text and whether its source was cut at the character cap (the last word may be partial). */
+function previewParts(body: string): { text: string; truncated: boolean } {
   const lines = body.split("\n");
   const prose: string[] = [];
   let proseLength = 0;
@@ -88,7 +93,24 @@ export function plainTextPreview(body: string): string {
   }
   for (const source of [prose.join("\n"), tables, code]) {
     const text = cleanMarkdown(source.slice(0, PREVIEW_CHARS));
-    if (text !== "") return text;
+    if (text !== "") return { text, truncated: source.length > PREVIEW_CHARS };
   }
-  return "";
+  return { text: "", truncated: false };
+}
+
+export const PREVIEW_MAX_WORDS = 30;
+
+/**
+ * The note-list preview: `plainTextPreview` shortened to at most 30 whole words, with an
+ * ellipsis when text was left out. Words are never split; the card adds a 3-line clamp.
+ */
+export function compactPreview(body: string, maxWords = PREVIEW_MAX_WORDS): string {
+  const { text, truncated } = previewParts(body);
+  const words = text === "" ? [] : text.split(" ");
+  // A cut at the character cap may have split the last word: drop it. Text without spaces
+  // (one long token, CJK) has no word to drop and is only shortened by the card's CSS clamp.
+  const capped = truncated && words.length > 1;
+  if (words.length <= maxWords && !capped) return text;
+  const kept = capped && words.length <= maxWords ? words.slice(0, -1) : words.slice(0, maxWords);
+  return `${kept.join(" ").replace(/[\s,;:.\-\u2013\u2014]+$/, "")}\u2026`;
 }

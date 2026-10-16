@@ -7,6 +7,7 @@
     "lint": "eslint .",
     "test:auth": "node scripts/test-auth.mts",
     "test:editor": "node scripts/test-editor.mts",
+    "test:list": "node scripts/test-note-list.mts",
     "test:rls": "node scripts/test-rls.mts"
   },
   "dependencies": {
