@@ -32,7 +32,7 @@ export function NoteCard({ note, tags, selected, onSelect }: NoteCardProps) {
     >
       <span className="block truncate text-base font-semibold leading-5">{note.title}</span>
       {note.body && (
-        <span className="mt-1 line-clamp-3 block break-words text-[13px] leading-5 text-muted-foreground">
+        <span className="mt-1 line-clamp-3 break-words text-[13px] leading-5 text-muted-foreground">
           {compactPreview(note.body)}
         </span>
       )}

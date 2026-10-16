@@ -85,7 +85,7 @@ export function NoteEditor(props: NoteEditorProps) {
 
   return (
     <section aria-label="Editor" className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-background">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-6 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 md:px-6">
         <p
           className={cn(
             "min-w-0 flex-1 basis-40 text-sm",
@@ -132,7 +132,7 @@ export function NoteEditor(props: NoteEditorProps) {
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
-        <div className="mx-auto w-full max-w-[1100px] space-y-3 px-8 py-4">
+        <div className="mx-auto w-full max-w-[1100px] space-y-3 px-4 py-4 md:px-8">
           <div className="space-y-1.5">
             <FieldLabel htmlFor="note-title" required>
               Title

@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -16,6 +17,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { backAction, visiblePane, type MobilePane } from "@/lib/notes-mobile";
+import { cn } from "@/lib/utils";
 import { createSessionLossGate } from "@/lib/auth/session-loss";
 import { NotesDbError, type Collection, type Note } from "@/lib/notes-db";
 import {
@@ -32,10 +35,11 @@ import { NoteEditor, type Draft } from "./note-editor";
 import { NotesList } from "./notes-list";
 import { SidebarPanel } from "./sidebar-panel";
 import { TopBar } from "./top-bar";
+import { useBackGuard } from "./use-back-guard";
 import { useNotesData } from "./use-notes-data";
 
 type Pending =
-  | { kind: "navigate"; proceed: () => Promise<void> | void }
+  | { kind: "navigate"; proceed: (choice: "save" | "discard") => Promise<void> | void }
   | { kind: "delete-note"; note: Note }
   | { kind: "delete-collection"; collection: Collection };
 
@@ -69,8 +73,10 @@ export function NotesApp() {
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Below 768px the list and the editor are two screens; wide layouts show both.
+  const [requestedPane, setRequestedPane] = useState<MobilePane>("list");
   const [pending, setPending] = useState<Pending | null>(null);
-  // Only used at medium widths (768-1199px), where the sidebar is a toggled overlay.
+  // Used below 1200px (medium widths and phones), where the sidebar is a toggled drawer.
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [deleting, setDeleting] = useState(false);
@@ -91,10 +97,31 @@ export function NotesApp() {
     activeDraft !== null &&
     (activeDraft.title !== selectedNote.title || activeDraft.body !== selectedNote.body);
 
-  // Reload, tab close and Back would silently drop unsaved edits; ask the browser to confirm.
+  // Browser Back (the phone's system gesture too) with unsaved edits asks first; the page stays
+  // until the user chooses (lib/back-guard.ts). Reload and tab close use beforeunload below.
+  // Once the user chose Save or Discard the browser's own "Leave site?" prompt would only repeat
+  // the question, so it is switched off for the short time the page needs to go.
+  const leavingRef = useRef(false);
+  const leavePage = useBackGuard(dirty, () =>
+    setPending({
+      kind: "navigate",
+      proceed: (choice) => {
+        if (choice === "discard" && selectedNote) {
+          setDraft({ title: selectedNote.title, body: selectedNote.body });
+        }
+        leavingRef.current = true;
+        window.setTimeout(() => (leavingRef.current = false), 2000);
+        leavePage();
+      },
+    }),
+  );
+
+  // Reload and tab close would silently drop unsaved edits; ask the browser to confirm.
   useEffect(() => {
     if (!dirty) return;
-    const onBeforeUnload = (event: BeforeUnloadEvent) => event.preventDefault();
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!leavingRef.current) event.preventDefault();
+    };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [dirty]);
@@ -104,6 +131,18 @@ export function NotesApp() {
     [notes, view, selectedTagIds, query],
   );
   const visibleNotes = useMemo(() => orderNotes(filteredNotes, sort), [filteredNotes, sort]);
+
+  const pane = visiblePane(requestedPane, selectedNote !== null);
+  // Back on the phone list: the list was hidden, so bring the open note back into view and focus it.
+  const previousPane = useRef(pane);
+  useEffect(() => {
+    if (previousPane.current === "editor" && pane === "list" && window.matchMedia("(max-width: 767px)").matches) {
+      const card = document.querySelector<HTMLElement>('[aria-label="Notes"] [aria-current="true"]');
+      card?.scrollIntoView({ block: "nearest" });
+      card?.focus({ preventScroll: true });
+    }
+    previousPane.current = pane;
+  }, [pane]);
 
   // Runs a database action; on failure shows the message (and re-syncs if a row vanished).
   const attempt = useCallback(
@@ -139,6 +178,8 @@ export function NotesApp() {
   const open = (note: Note) => {
     setSelectedNoteId(note.id);
     setDraft({ title: note.title, body: note.body });
+    setRequestedPane("editor");
+    setSidebarOpen(false);
   };
 
   const save = useCallback(async (): Promise<boolean> => {
@@ -160,14 +201,29 @@ export function NotesApp() {
   }, [act, data, draft, selectedNote]);
 
   // Leaving a note with unsaved changes asks first.
-  const guarded = (proceed: () => Promise<void> | void) => {
+  const guarded = (proceed: (choice: "save" | "discard") => Promise<void> | void) => {
     if (dirty) setPending({ kind: "navigate", proceed });
-    else void proceed();
+    else void proceed("discard");
+  };
+
+  // Phone: back to the list. Unsaved changes ask first; discarding restores the saved text.
+  const backToList = () => {
+    if (saving) return; // a save is running: the draft is settled when it finishes
+    // After "Save" the draft already holds the saved text; only "Discard" restores it.
+    const goBack = (choice?: "save" | "discard") => {
+      if (choice === "discard" && selectedNote) {
+        setDraft({ title: selectedNote.title, body: selectedNote.body });
+      }
+      setRequestedPane("list");
+    };
+    if (backAction(dirty) === "ask") setPending({ kind: "navigate", proceed: goBack });
+    else goBack();
   };
 
   const selectNote = (id: number) => {
     if (id === selectedNoteId) {
       setSidebarOpen(false);
+      setRequestedPane("editor");
       return;
     }
     const target = notes.find((note) => note.id === id);
@@ -217,7 +273,7 @@ export function NotesApp() {
     if (!current) return;
     if (current.kind === "navigate") {
       if (choice === "save" && !(await save())) return;
-      await current.proceed();
+      await current.proceed(choice === "save" ? "save" : "discard");
     } else if (current.kind === "delete-note") {
       setDeleting(true);
       const ok = await act(() => data.removeNote(current.note.id));
@@ -225,6 +281,7 @@ export function NotesApp() {
       if (ok && selectedNoteId === current.note.id) {
         setSelectedNoteId(null);
         setDraft(null);
+        setRequestedPane("list");
       }
     } else {
       setDeleting(true);
@@ -240,7 +297,7 @@ export function NotesApp() {
 
   if (data.status === "loading") {
     return (
-      <div className="flex h-screen flex-col">
+      <div className="flex h-dvh flex-col">
         <div className="grid min-h-0 flex-1 gap-0 md:grid-cols-[280px_420px_1fr]" aria-busy="true">
           {[0, 1, 2].map((i) => (
             <div key={i} className="space-y-3 border-r p-4">
@@ -256,7 +313,7 @@ export function NotesApp() {
 
   if (data.status === "error") {
     return (
-      <div className="flex h-screen flex-col">
+      <div className="flex h-dvh flex-col">
         <div className="mx-auto mt-16 max-w-md space-y-3 px-4">
           <Alert variant="destructive">
             <AlertDescription>{data.loadError}</AlertDescription>
@@ -283,7 +340,7 @@ export function NotesApp() {
         : "No notes yet. Create your first note.";
 
   return (
-    <div className="flex h-screen flex-col bg-app">
+    <div className="flex h-dvh flex-col bg-app">
       {error && (
         <Alert variant="destructive" className="rounded-none border-x-0 border-t-0">
           <AlertDescription className="flex items-center justify-between gap-2">
@@ -294,7 +351,7 @@ export function NotesApp() {
           </AlertDescription>
         </Alert>
       )}
-      <main className="relative grid min-h-0 flex-1 gap-3 p-3 grid-rows-[auto_auto_auto_minmax(0,1fr)] md:grid-cols-[minmax(0,1fr)] md:grid-rows-1 min-[1200px]:grid-cols-[280px_minmax(0,1fr)]">
+      <main className="relative flex min-h-0 flex-1 flex-col gap-3 p-3 md:grid md:grid-cols-[minmax(0,1fr)] md:grid-rows-1 min-[1200px]:grid-cols-[280px_minmax(0,1fr)]">
         <SidebarPanel
           open={sidebarOpen}
           onOpenChange={setSidebarOpen}
@@ -321,7 +378,8 @@ export function NotesApp() {
           onCreateTag={(name) => attempt(() => data.addNewTag(name))}
         />
         {/* Columns 2 and 3: a shared header, then the list and the editor. On mobile these
-            wrappers vanish (display: contents) and everything stacks as before. */}
+            wrappers vanish (display: contents) on a phone, where the list and the editor are
+            two screens (`pane`) with a Back button on the editor screen. */}
         <div className="flex min-h-0 flex-col gap-3 max-md:contents">
           <TopBar
             query={query}
@@ -330,8 +388,10 @@ export function NotesApp() {
             onToggleSidebar={() => setSidebarOpen((o) => !o)}
             creating={creating}
             onNewNote={newNote}
+            hiddenOnPhone={pane === "editor"}
           />
           <div className="grid min-h-0 flex-1 gap-3 max-md:contents md:grid-cols-[360px_minmax(0,1fr)] min-[1200px]:grid-cols-[420px_minmax(0,1fr)]">
+            <div className={cn("min-h-0 md:contents max-md:grid max-md:flex-1 max-md:grid-rows-[minmax(0,1fr)]", pane === "editor" && "max-md:hidden")}>
             <NotesList
               title={viewTitle}
               titleColor={viewColor}
@@ -347,6 +407,19 @@ export function NotesApp() {
               onSelectNote={selectNote}
               onClearFilters={clearFilters}
             />
+            </div>
+            <div className={cn("min-h-0 md:contents max-md:flex max-md:flex-1 max-md:flex-col max-md:gap-3", pane === "list" && "max-md:hidden")}>
+            <Button
+              variant="outline"
+              className="h-11 shrink-0 justify-start gap-2 bg-background md:hidden"
+              onClick={backToList}
+              disabled={saving}
+              aria-label="Back to notes list"
+            >
+              <ArrowLeft aria-hidden="true" />
+              <span className="truncate">{viewTitle}</span>
+            </Button>
+            <div className="min-h-0 md:contents max-md:grid max-md:flex-1 max-md:grid-rows-[minmax(0,1fr)]">
             <NoteEditor
               note={selectedNote}
               draft={activeDraft}
@@ -369,6 +442,8 @@ export function NotesApp() {
               onExport={() => selectedNote && downloadNoteAsMarkdown(selectedNote)}
               onDelete={() => selectedNote && setPending({ kind: "delete-note", note: selectedNote })}
             />
+            </div>
+            </div>
           </div>
         </div>
       </main>
