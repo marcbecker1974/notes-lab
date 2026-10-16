@@ -73,6 +73,13 @@ test("preview: card clamps to 3 lines (static)", () => {
   assert.ok(card.includes("line-clamp-3") && !card.includes("line-clamp-2"));
   assert.ok(card.includes("compactPreview(note.body)"));
 });
+test("preview: no display utility overrides the clamp (regression: `block` after `line-clamp-3` showed every line)", () => {
+  const card = readFileSync("components/notes/note-card.tsx", "utf8");
+  const classes = /className="([^"]*line-clamp-3[^"]*)"/.exec(card)?.[1].split(/\s+/) ?? [];
+  assert.ok(classes.includes("line-clamp-3"));
+  const display = classes.filter((c) => /^(block|inline|inline-block|flex|inline-flex|grid|contents|table)$/.test(c));
+  assert.deepEqual(display, [], "line-clamp sets display itself; a display class generated later wins and disables it");
+});
 
 // --- ordering
 const same = "2026-01-01T00:00:00Z";

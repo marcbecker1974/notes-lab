@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ComponentProps } from "react";
+import { useEffect, useRef, type ComponentProps } from "react";
 import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -13,9 +13,21 @@ type SidebarPanelProps = ComponentProps<typeof Sidebar> & {
   suspendEscape: boolean;
 };
 
-// Wraps the sidebar. Wide desktop and mobile: a plain column. Medium widths
-// (768-1199px): hidden until toggled, then a 260px overlay with a backdrop.
+// Wraps the sidebar. Wide desktop (1200px and up): a plain column. Below that, medium
+// widths and phones: hidden until the menu button toggles it, then an overlay drawer
+// (260px, or 85% of a narrow screen) with a backdrop.
 export function SidebarPanel({ open, onOpenChange, suspendEscape, ...sidebar }: SidebarPanelProps) {
+  // Focus moves into the drawer when it opens and back to the menu button when it closes.
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (open) closeRef.current?.focus();
+    else if (wasOpen.current) {
+      document.querySelector<HTMLElement>('[aria-controls="collections-panel"]')?.focus();
+    }
+    wasOpen.current = open;
+  }, [open]);
+
   useEffect(() => {
     // Escape that belongs to an open dialog or menu must not also close the sidebar.
     if (!open || suspendEscape) return;
@@ -32,13 +44,13 @@ export function SidebarPanel({ open, onOpenChange, suspendEscape, ...sidebar }: 
         id="collections-panel"
         className={
           open
-            ? "flex min-h-0 flex-col md:max-[1199px]:absolute md:max-[1199px]:inset-y-3 md:max-[1199px]:left-3 md:max-[1199px]:z-30 md:max-[1199px]:w-[260px] md:max-[1199px]:rounded-xl md:max-[1199px]:bg-background md:max-[1199px]:shadow-xl"
-            : "flex min-h-0 flex-col md:max-[1199px]:hidden"
+            ? "flex min-h-0 flex-col max-[1199px]:absolute max-[1199px]:inset-y-3 max-[1199px]:left-3 max-[1199px]:z-30 max-[1199px]:w-[min(85vw,300px)] md:max-[1199px]:w-[260px] max-[1199px]:rounded-xl max-[1199px]:bg-background max-[1199px]:shadow-xl"
+            : "flex min-h-0 flex-col max-[1199px]:hidden"
         }
       >
-        <div className="hidden items-center justify-between border-b px-3 py-2 md:max-[1199px]:flex">
+        <div className="hidden items-center justify-between border-b px-3 py-2 max-[1199px]:flex">
           <span className="text-sm font-semibold">Collections</span>
-          <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Hide collections" onClick={() => onOpenChange(false)}>
+          <Button ref={closeRef} variant="ghost" size="icon" className="h-9 w-9" aria-label="Hide collections" onClick={() => onOpenChange(false)}>
             <X className="h-4 w-4" />
           </Button>
         </div>
@@ -49,7 +61,7 @@ export function SidebarPanel({ open, onOpenChange, suspendEscape, ...sidebar }: 
       {open && (
         <div
           aria-hidden="true"
-          className="hidden md:max-[1199px]:fixed md:max-[1199px]:inset-0 md:max-[1199px]:z-20 md:max-[1199px]:block md:max-[1199px]:bg-black/30"
+          className="hidden max-[1199px]:fixed max-[1199px]:inset-0 max-[1199px]:z-20 max-[1199px]:block max-[1199px]:bg-black/30"
           onClick={() => onOpenChange(false)}
         />
       )}

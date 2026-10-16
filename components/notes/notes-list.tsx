@@ -84,7 +84,7 @@ export function NotesList(props: NotesListProps) {
             </p>
           )}
           <Select value={props.sort} onValueChange={(v) => isNoteSort(v) && props.onSortChange(v)}>
-            <SelectTrigger aria-label="Sort notes" className="h-7 w-auto gap-1 px-2 text-xs">
+            <SelectTrigger aria-label="Sort notes" className="h-9 w-auto max-w-[10.5rem] gap-1 px-2 text-xs sm:h-7 sm:max-w-none">
               <SelectValue />
             </SelectTrigger>
             <SelectContent align="end">
