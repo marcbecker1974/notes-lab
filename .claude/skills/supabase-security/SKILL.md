@@ -3,6 +3,23 @@ name: supabase-security
 description: Supabase security best practices covering Row Level Security, API key handling, JWT policies, and common pitfalls. Load this skill when auditing a Supabase-backed project for security issues.
 ---
 
+## Project overrides (Notes Lab)
+
+These rules take precedence over the generic guidance below.
+
+- **Corrections are suggested SQL migrations only.** Propose a new file in
+  `supabase/migrations/`; never edit an applied migration, and never recommend changing the
+  live database or dashboard by hand.
+- **Dashboard checks are read-only.** Table Editor, Authentication > Policies and Advisors
+  may be used to look, not to change. A dashboard check that was not performed is "not checked".
+- **Enable RLS explicitly for every new table**, with `alter table ... enable row level
+  security` in the migration that creates it, even though the Table Editor and the
+  `rls_auto_enable()` event trigger may also do it.
+- **Verification is the existing project test:** `npm run test:rls` (two accounts, against the
+  live database; `--dry-run` is offline, `--run` writes disposable rows). Also
+  `npm run test:auth` for the offline route checks. An auditor without a shell cannot run
+  them; report them as "not checked" unless their output was provided.
+
 ## Row Level Security (RLS)
 
 Every table in the public schema must have RLS enabled. Without it, any client
