@@ -36,6 +36,7 @@ The Mid-Sprint project is complete and kept as history. The **active scope is th
 - Layout: three columns from 1200px; the collections sidebar is a drawer below 1200px; below 768px the list and the editor are two screens with a Back button (Feature 8.3, `docs/ARCHITECTURE.md` 9.2c). Never combine a display utility (`block`, `flex`) with `line-clamp-*` on one element. Every note update, including collection moves, bumps `updated_at`.
 - Scope changes are recorded in `docs/PROJECT_BRIEF.md`.
 - **Browser tooling (Playwright):** use the CLI for one-off tasks (`npm run test:e2e`, `npx playwright test`). Use the Playwright MCP tools when the agent needs to repeat or react to what is on screen.
+- **Playwright E2E tests (`npm run test:e2e`)** sign in as the existing hosted Supabase test account A and create and delete notes in the live project. They need `TEST_USER_A_EMAIL` and `TEST_USER_A_PASSWORD` from the git-ignored `.env.test.local` (the same variables as `test:rls`); never print or commit them. Test notes are titled `ZZ-E2E-…` and each test deletes only its own notes in a `finally`.
 
 ## Database access rules (centralised)
 

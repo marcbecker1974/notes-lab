@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { deleteTestNotes } from './helpers';
 
 const email = process.env.TEST_USER_A_EMAIL;
 const password = process.env.TEST_USER_A_PASSWORD;
@@ -15,31 +16,30 @@ test('an edited note title is saved and shown after a reload', async ({ page }) 
   await page.getByRole('button', { name: 'Login' }).click();
   await page.waitForURL('**/notes');
 
-  // Arrange: a disposable note with a known title.
-  await page.getByRole('button', { name: 'New note' }).first().click();
-  await page.getByLabel('Title').fill(oldTitle);
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByText('All changes saved')).toBeVisible();
+  try {
+    // Arrange: a disposable note with a known title.
+    await page.getByRole('button', { name: 'New note' }).first().click();
+    await page.getByLabel('Title').fill(oldTitle);
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.getByText('All changes saved')).toBeVisible();
 
-  // Act: reload, open the note from the list, change the title and save.
-  await page.waitForLoadState('networkidle');
-  await page.reload();
-  await page.getByText(oldTitle).first().click();
-  await expect(page.getByLabel('Title')).toHaveValue(oldTitle);
-  await page.getByLabel('Title').fill(newTitle);
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByText('All changes saved')).toBeVisible();
+    // Act: reload, open the note from the list, change the title and save.
+    await page.waitForLoadState('networkidle');
+    await page.reload();
+    await page.getByText(oldTitle).first().click();
+    await expect(page.getByLabel('Title')).toHaveValue(oldTitle);
+    await page.getByLabel('Title').fill(newTitle);
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.getByText('All changes saved')).toBeVisible();
 
-  // Assert: after another reload the new title is in the list and the editor, the old one is gone.
-  await page.waitForLoadState('networkidle');
-  await page.reload();
-  await expect(page.getByText(newTitle).first()).toBeVisible();
-  await expect(page.getByText(oldTitle)).toHaveCount(0);
-  await page.getByText(newTitle).first().click();
-  await expect(page.getByLabel('Title')).toHaveValue(newTitle);
-
-  // Clean up the disposable note through the UI.
-  await page.getByRole('button', { name: 'Delete note' }).click();
-  await page.getByRole('button', { name: 'Delete', exact: true }).click();
-  await expect(page.getByText(newTitle)).toHaveCount(0);
+    // Assert: after another reload the new title is in the list and the editor, the old one is gone.
+    await page.waitForLoadState('networkidle');
+    await page.reload();
+    await expect(page.getByText(newTitle).first()).toBeVisible();
+    await expect(page.getByText(oldTitle)).toHaveCount(0);
+    await page.getByText(newTitle).first().click();
+    await expect(page.getByLabel('Title')).toHaveValue(newTitle);
+  } finally {
+    await deleteTestNotes(page, [oldTitle, newTitle]);
+  }
 });

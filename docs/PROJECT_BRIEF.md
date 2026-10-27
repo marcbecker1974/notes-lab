@@ -124,7 +124,7 @@ Notes that the compatibility guard keeps out of the visual editor (tables, image
 ### Future enhancements (not Sprint 2)
 
 - **FUT-1 – Account linking** across Google and email/password identities, through supported Supabase Auth mechanisms only (A11).
-- Other known limitations stay as recorded in `REFLECTION.md` (for example no tag deletion or renaming, unpaged lists, no automated browser tests, no CI).
+- Other known limitations stay as recorded in `REFLECTION.md` (for example no tag deletion or renaming, unpaged lists, no CI; automated browser tests are limited to two Playwright happy-path tests, `npm run test:e2e`).
 
 ## A5. Evaluation criteria (official) and bonus opportunities
 
