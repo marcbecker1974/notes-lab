@@ -3,6 +3,10 @@ export type ContextNote = { title: string; body: string };
 export const NOTES_CONTEXT_MAX = 20_000; // characters for the whole block
 export const NOTE_EXCERPT_MAX = 2_000; // characters per note
 
+// A note must not be able to close (or reopen) the block it sits in: any <notes> or
+// </notes> tag, also with spaces or odd case, gets a backslash after the "<".
+const neutralise = (text: string) => text.replace(/<(\s*\/?\s*notes\b)/gi, "<\\$1");
+
 /**
  * Plain-text block of the user's notes for the system prompt ("" when there are none).
  * Pure: the notes are loaded elsewhere. Notes come in newest first; once the budget is
@@ -19,8 +23,9 @@ export function buildNotesContext(
   for (const [index, note] of notes.entries()) {
     const body = note.body.trim();
     const text = body.length > excerptMax ? `${body.slice(0, excerptMax)}…` : body;
-    // A note must not be able to close the block it sits in.
-    const entry = `[Note ${index + 1}] Title: ${note.title.trim() || "(untitled)"}\n${text.replace(/<\/notes>/gi, "<\\/notes>")}`;
+    // The title is one line (a line break could fake the next "[Note n]" header).
+    const title = neutralise(note.title.replace(/\s+/g, " ").trim()) || "(untitled)";
+    const entry = `[Note ${index + 1}] Title: ${title}\n${neutralise(text)}`;
     if (used + entry.length > maxChars) {
       omitted = notes.length - index;
       break;

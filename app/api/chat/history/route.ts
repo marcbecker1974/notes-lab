@@ -6,9 +6,13 @@ import { createClient } from "@/lib/supabase/server";
 export async function GET() {
   await requireUser(); // redirect throws: deliberately outside try/catch
   const supabase = await createClient();
-  const conversation = await loadLatestConversation(supabase);
-  return Response.json(
-    { conversation },
-    { headers: { "Cache-Control": "no-store" } },
-  );
+  const result = await loadLatestConversation(supabase);
+  if (!result) {
+    // A failed read must not look like "no conversation yet".
+    return Response.json(
+      { error: "Your conversation could not be loaded." },
+      { status: 500, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  return Response.json(result, { headers: { "Cache-Control": "no-store" } });
 }

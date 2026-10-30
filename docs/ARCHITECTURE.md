@@ -415,6 +415,12 @@ updated. `GET /api/chat/history` returns the newest conversation, `POST
 /api/chat/conversations` opens an empty one, and `POST /api/chat` saves each exchange
 after the reply (the conversation id comes back; a failed save never blocks the answer).
 The in-conversation memory is unchanged: the client still sends the whole history.
+A failed history read answers 500 (the panel shows a notice), which differs from "no
+conversation yet" (200 with `conversation: null`); a partial save keeps the new
+conversation's id so the next send reuses it. Chat requests do not follow redirects: a
+redirect (the proxy's answer to a missing session) makes the panel call `router.refresh()`,
+and the page's server-side check ends on the sign-in page. Notes in the prompt have their
+`<notes>` tags neutralised in titles and bodies, and a title is kept on one line.
 
 Test substitute: with `CHAT_TEST_STUB=1` (set only by `playwright.chat.config.ts`, which
 starts a separate dev server on port 3100 with its own build folder `.next-chat-test`)

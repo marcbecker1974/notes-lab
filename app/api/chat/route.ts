@@ -56,9 +56,9 @@ export async function POST(request: Request) {
   try {
     const reply = await getChatReply(messages, notesContext);
     // Persistence sits on top of the reply: a failed save never blocks the answer.
-    const savedId = await saveExchange(supabase, conversationId, messages[messages.length - 1].content, reply.content);
+    const stored = await saveExchange(supabase, conversationId, messages[messages.length - 1].content, reply.content);
     return Response.json(
-      { ...reply, conversationId: savedId ?? conversationId, saved: savedId !== null },
+      { ...reply, conversationId: stored.id ?? conversationId, saved: stored.saved },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

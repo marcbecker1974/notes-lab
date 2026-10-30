@@ -26,6 +26,14 @@ function track(page: Page) {
   });
 }
 
+async function signIn(page: Page) {
+  await page.goto('/auth/login');
+  await page.getByLabel('Email').fill(email!);
+  await page.getByLabel('Password').fill(password!);
+  await page.getByRole('button', { name: 'Login', exact: true }).click();
+  await page.waitForURL('**/notes');
+}
+
 async function openChat(page: Page) {
   await page.getByRole('button', { name: 'Open chat' }).click();
   await expect(page.getByLabel('Message', { exact: true })).toBeEnabled(); // saved conversation loaded
@@ -62,11 +70,7 @@ test.afterAll(async () => {
 
 test('chat: reply, follow-up, reload keeps order, new conversation is empty', async ({ page }) => {
   track(page);
-  await page.goto('/auth/login');
-  await page.getByLabel('Email').fill(email!);
-  await page.getByLabel('Password').fill(password!);
-  await page.getByRole('button', { name: 'Login', exact: true }).click();
-  await page.waitForURL('**/notes');
+  await signIn(page);
   await openChat(page);
 
   // Start from an empty chat, whatever the account had before.
@@ -128,4 +132,29 @@ test('chat: reply, follow-up, reload keeps order, new conversation is empty', as
     await expect(roles(page)).toHaveCount(2);
     expect((await texts(page))[1]).toBe(`assistant: [stub] reply 1 to: ${RUN} fourth (history: 1)`);
   });
+});
+
+test('a failed history load shows a notice instead of a silently empty chat', async ({ page }) => {
+  track(page);
+  await signIn(page);
+  await page.route('**/api/chat/history', (route) =>
+    route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'x' }) }),
+  );
+  await openChat(page);
+  await expect(page.getByText('Your earlier conversation could not be loaded.')).toBeVisible();
+  await expect(roles(page)).toHaveCount(0);
+});
+
+test('an ended session sends the user to sign-in and the message is never shown as sent', async ({ page, context }) => {
+  track(page);
+  await signIn(page);
+  await openChat(page);
+  await context.clearCookies(); // the session is gone while the chat is open
+  await send(page, `${RUN} after logout`);
+
+  await page.waitForURL('**/auth/login', { timeout: 15_000 });
+  await expect(page.getByLabel('Email')).toBeVisible(); // the sign-in page, not a half-updated chat
+  // Never shown as sent or answered. Next keeps the previous route in the DOM, hidden, so
+  // only what the user can see counts.
+  await expect(page.getByText('after logout').filter({ visible: true })).toHaveCount(0);
 });

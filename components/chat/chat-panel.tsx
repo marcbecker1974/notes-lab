@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { Send, SquarePen } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -7,6 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { ChatMessage } from "@/lib/ai/messages";
 import { cn } from "@/lib/utils";
+
+// A request without a valid session is redirected to the sign-in page by the proxy.
+// fetch would follow that redirect and get HTML, so requests do not follow redirects; a
+// redirect means the session is gone, and router.refresh() lets the server-side check
+// of the page send the user to sign in (same as the notes screen, lib/auth/session-loss.ts).
+const NO_FOLLOW: RequestInit = { redirect: "manual" };
+const sessionEnded = (response: Response) => response.type === "opaqueredirect";
+const SESSION_NOTICE = "Your session has ended. Signing you in again…";
 
 // Same limits as the server (lib/ai/messages.ts); the server stays the authority.
 const MAX_MESSAGES = 60;
@@ -29,6 +38,7 @@ type ChatPanelProps = {
 // id; the newest conversation is loaded once, the first time the panel is active, so a
 // reload brings it back. "New conversation" asks the server for an empty one.
 export function ChatPanel({ headerStart, headerEnd, active = true }: ChatPanelProps) {
+  const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState<string | null>(null);
@@ -50,8 +60,15 @@ export function ChatPanel({ headerStart, headerEnd, active = true }: ChatPanelPr
   useEffect(() => {
     if (!active || requested.current) return;
     requested.current = true;
-    fetch("/api/chat/history")
-      .then((response) => (response.ok ? response.json() : Promise.reject(new Error("history"))))
+    fetch("/api/chat/history", NO_FOLLOW)
+      .then((response) => {
+        if (sessionEnded(response)) {
+          setNotice(SESSION_NOTICE);
+          router.refresh();
+          return { conversation: null };
+        }
+        return response.ok ? response.json() : Promise.reject(new Error("history"));
+      })
       .then((data: { conversation?: { id: number; messages: ChatMessage[] } | null }) => {
         if (data.conversation) {
           setConversationId(data.conversation.id);
@@ -60,7 +77,7 @@ export function ChatPanel({ headerStart, headerEnd, active = true }: ChatPanelPr
       })
       .catch(() => setNotice("Your earlier conversation could not be loaded."))
       .finally(() => setLoaded(true));
-  }, [active]);
+  }, [active, router]);
 
   useEffect(() => {
     if (active) endRef.current?.scrollIntoView({ block: "end" });
@@ -81,10 +98,17 @@ export function ChatPanel({ headerStart, headerEnd, active = true }: ChatPanelPr
     setPending(text);
     try {
       const response = await fetch("/api/chat", {
+        ...NO_FOLLOW,
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: [...messages, { role: "user", content: text }], conversationId }),
       });
+      if (sessionEnded(response)) {
+        setDraft(text);
+        setNotice(SESSION_NOTICE);
+        router.refresh();
+        return;
+      }
       const data: { content?: unknown; error?: unknown; conversationId?: unknown; saved?: unknown } = await response
         .json()
         .catch(() => ({}));
@@ -116,7 +140,12 @@ export function ChatPanel({ headerStart, headerEnd, active = true }: ChatPanelPr
     setError(null);
     setNotice(null);
     try {
-      const response = await fetch("/api/chat/conversations", { method: "POST" });
+      const response = await fetch("/api/chat/conversations", { ...NO_FOLLOW, method: "POST" });
+      if (sessionEnded(response)) {
+        setNotice(SESSION_NOTICE);
+        router.refresh();
+        return;
+      }
       const data: { id?: unknown } = await response.json().catch(() => ({}));
       if (!response.ok || typeof data.id !== "number") throw new Error("new");
       setConversationId(data.id);
