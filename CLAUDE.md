@@ -2,6 +2,44 @@
 
 @AGENTS.md
 
+## Authorised extension: Chat lab (2026-10-30)
+
+The owner explicitly authorised the five-stage OpenRouter chatbot lab in this
+repository on 2026-10-30. For this extension only, the earlier exclusion of AI
+features is superseded. See `docs/CHAT_LAB.md` and `docs/PROJECT_BRIEF.md` Part C.
+Existing Sprint 2 functionality and user data must remain intact. Deployment and
+public sharing remain out of scope. No extra dependency is needed for OpenRouter.
+
+AI model calls:
+- All model calls must happen server-side only. Never call OpenRouter from browser code.
+- OPENROUTER_API_KEY lives in .env.local and must never be exposed to the browser
+  (no NEXT_PUBLIC_ prefix and no passing it to client components).
+- Only `lib/ai/config.ts` reads the key. Only `lib/ai/openrouter.ts` calls OpenRouter.
+  Both import `server-only`; model selection uses the single OPENROUTER_MODEL setting.
+- Never log keys, request headers or raw provider error bodies. Offline AI tests
+  must replace fetch and must not contact OpenRouter or spend credits.
+- **Notes in chat (owner-approved 2026-10-30):** `POST /api/chat` reads the signed-in
+  user's own notes (title and body, newest 50) with the request's session cookie, so
+  RLS limits it to their rows, and puts a capped text block (20,000 characters) into the
+  server-built system prompt (`lib/ai/chat-notes.ts`, `lib/ai/notes-context.ts`). Note
+  text therefore goes to the model provider. Never use a service key for this, never
+  send notes from the browser, never let the client set the system prompt.
+- **Chat persistence (CHAT-3, applied 2026-10-30):** tables `conversations` and
+  `messages` (migration `20261030140000`, owner-only RLS, `anon` revoked, column-level
+  grants, no UPDATE) plus owner DELETE on `conversations` only (`20261030170000`;
+  messages go by cascade, single messages stay undeletable). Only the server saves
+  (`lib/ai/chat-store.ts`, with the user's session client); the browser never writes
+  these tables. Further chat schema changes need a new migration, owner-only RLS and the
+  owner's approval of the concrete operation (`supabase db push`).
+- **Chat tests:** `npm run test:ai` and `npm run test:chat` (offline), `npm run test:chat-rls`
+  (`--dry-run` offline; `--run` writes and removes disposable `ZZ-CHAT-` rows) and
+  `npm run test:e2e:chat`. The last one runs its own dev server on port 3100 with
+  `CHAT_TEST_STUB=1`, which makes `lib/ai/openrouter.ts` return fixed `[stub]` replies
+  (no key, no network, never in production). It deletes only the conversations it
+  created. Never set `CHAT_TEST_STUB` in `.env.local` or for the normal server, and keep
+  `tests-stub/` out of the default `./tests` run (that one reuses the real server).
+
+
 Notes Lab is the active **Turing College Sprint 2 project**, "Full-Stack App with Database and Authentication": a secure, multi-user Personal AI Development Journal with collections, tags and live search, continued from the Mid-Sprint Notes App. **Historical context:** the Mid-Sprint project, "Notes App with Collections and Search" (a personal notes app and AI Learning Journal), is complete; its scope and decisions are preserved in `docs/PROJECT_BRIEF.md` Part B.
 
 Read before working: `docs/PROJECT_BRIEF.md` (scope and acceptance criteria), `docs/ARCHITECTURE.md` (design and security), `docs/SUPABASE_REFERENCES.md` (cited Supabase references).
@@ -46,6 +84,7 @@ The Mid-Sprint project is complete and kept as history. The **active scope is th
 - Always check `error`. Functions return typed data or throw a typed `NotesDbError` with a user-safe message; raw Postgres errors do not reach the UI.
 - `notes-db.ts` never reads or writes `user_id` and contains no role, `anon` or auth logic. Exported types omit `user_id`. This keeps the app auth-ready.
 - Filtering, AND tag filtering, search and count badges run in memory on loaded data, not through extra queries.
+- **Chat exception:** `lib/ai/chat-notes.ts` (server-only) is the one other reader of `notes`: `lib/notes-db.ts` is `client-only` and cannot run in a route handler. It selects `title, body` through the server client, never touches `user_id` and never writes.
 - **Sprint 2 clarification:** access to the existing database tables stays centralised in `lib/notes-db.ts` as above. Supabase Storage (Feature 10, planned, not implemented) is not covered by the table rule: it may use a separate dedicated module (so `storage.from(...)` calls do not count against the table rule), subject to an approved architecture decision. `lib/notes-db.ts` itself keeps not reading or writing `user_id`.
 
 ## Supabase conventions

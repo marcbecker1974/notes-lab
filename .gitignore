@@ -56,3 +56,9 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+# chat test server build output (playwright.chat.config.ts)
+/.next-chat-test/
+
+# Playwright MCP browser session files
+/.playwright-mcp/

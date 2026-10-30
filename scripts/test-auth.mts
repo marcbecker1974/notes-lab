@@ -634,12 +634,15 @@ const MIGRATION = migrationFile
   ? src(`supabase/migrations/${migrationFile}`)
   : "";
 const sqlCode = (text: string) => text.replace(/--[^\n]*/g, ""); // statements only, without comments
-await test("owner-access migration: exists, is newer than every earlier migration", () => {
+await test("owner-access migration: exists and runs after the temporary anon migration it closes", () => {
   assert.ok(migrationFile, "migration file not found");
   const names = readdirSync(
     new URL("../supabase/migrations/", import.meta.url),
   ).sort();
-  assert.equal(names[names.length - 1], migrationFile);
+  const tempAnon = names.find((n) => n.endsWith("_temp_anon_access.sql"));
+  assert.ok(tempAnon, "temporary anon migration not found");
+  // Later migrations (for example the chat tables) may follow it; it must never come first.
+  assert.ok(names.indexOf(tempAnon) < names.indexOf(migrationFile));
 });
 await test("owner-access migration: every policy is `to authenticated` with an owner check, one per operation", () => {
   const m = sqlCode(MIGRATION);
