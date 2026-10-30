@@ -6,6 +6,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { ChatText } from "./chat-text";
+import type { SearchNote } from "@/lib/ai/library-tool";
 import type { ChatMessage } from "@/lib/ai/messages";
 import { cn } from "@/lib/utils";
 
@@ -20,6 +22,10 @@ const SESSION_NOTICE = "Your session has ended. Signing you in again…";
 // Same limits as the server (lib/ai/messages.ts); the server stays the authority.
 const MAX_MESSAGES = 60;
 const MAX_LENGTH = 8000;
+
+// An assistant message may carry the library searches the model made for it (shown above
+// the answer). They are not saved with the conversation, so reloaded messages have none.
+type ShownMessage = ChatMessage & { searches?: SearchNote[] };
 
 type ChatPanelProps = {
   /** Shown at the start of the header (the page's back link). */
@@ -37,9 +43,18 @@ type ChatPanelProps = {
 // Persistence sits on top: the server saves each exchange and returns the conversation
 // id; the newest conversation is loaded once, the first time the panel is active, so a
 // reload brings it back. "New conversation" asks the server for an empty one.
+function readSearches(value: unknown): SearchNote[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) =>
+    item && typeof item.query === "string" && typeof item.count === "number"
+      ? [{ query: item.query, count: item.count, failed: item.failed === true }]
+      : [],
+  );
+}
+
 export function ChatPanel({ headerStart, headerEnd, active = true }: ChatPanelProps) {
   const router = useRouter();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ShownMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -101,7 +116,10 @@ export function ChatPanel({ headerStart, headerEnd, active = true }: ChatPanelPr
         ...NO_FOLLOW,
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: [...messages, { role: "user", content: text }], conversationId }),
+        body: JSON.stringify({
+          messages: [...messages, { role: "user", content: text }].map(({ role, content }) => ({ role, content })),
+          conversationId,
+        }),
       });
       if (sessionEnded(response)) {
         setDraft(text);
@@ -109,7 +127,7 @@ export function ChatPanel({ headerStart, headerEnd, active = true }: ChatPanelPr
         router.refresh();
         return;
       }
-      const data: { content?: unknown; error?: unknown; conversationId?: unknown; saved?: unknown } = await response
+      const data: { content?: unknown; error?: unknown; conversationId?: unknown; saved?: unknown; searches?: unknown } = await response
         .json()
         .catch(() => ({}));
       if (!response.ok || typeof data.content !== "string") {
@@ -118,7 +136,7 @@ export function ChatPanel({ headerStart, headerEnd, active = true }: ChatPanelPr
       setMessages((current) => [
         ...current,
         { role: "user", content: text },
-        { role: "assistant", content: data.content as string },
+        { role: "assistant", content: data.content as string, searches: readSearches(data.searches) },
       ]);
       if (typeof data.conversationId === "number") setConversationId(data.conversationId);
       if (data.saved === false) setNotice("This exchange could not be saved and will be gone after a reload.");
@@ -158,7 +176,7 @@ export function ChatPanel({ headerStart, headerEnd, active = true }: ChatPanelPr
     }
   }
 
-  const visible: ChatMessage[] = pending ? [...messages, { role: "user", content: pending }] : messages;
+  const visible: ShownMessage[] = pending ? [...messages, { role: "user", content: pending }] : messages;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -182,11 +200,18 @@ export function ChatPanel({ headerStart, headerEnd, active = true }: ChatPanelPr
         )}
         {loaded && visible.length === 0 && (
           <p className="py-12 text-center text-sm text-muted-foreground">
-            Ask anything. The assistant remembers what you said earlier in this conversation.
+            Ask about the articles in your library. Factual answers come only from your library and link their sources.
           </p>
         )}
         {visible.map((message, index) => (
-          <div key={index} className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}>
+          <div key={index} className={cn("flex flex-col gap-1", message.role === "user" ? "items-end" : "items-start")}>
+            {message.searches?.map((search, i) => (
+              <p key={i} className="max-w-[85%] break-words px-1 text-xs text-muted-foreground" data-search={search.query}>
+                {search.failed
+                  ? `Search failed: “${search.query}”`
+                  : `Searched your library for “${search.query}”: ${search.count} ${search.count === 1 ? "passage" : "passages"}`}
+              </p>
+            ))}
             <p
               className={cn(
                 "max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-4 py-2 text-sm",
@@ -196,7 +221,7 @@ export function ChatPanel({ headerStart, headerEnd, active = true }: ChatPanelPr
               )}
               data-role={message.role}
             >
-              {message.content}
+              {message.role === "assistant" ? <ChatText text={message.content} /> : message.content}
             </p>
           </div>
         ))}

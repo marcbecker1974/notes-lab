@@ -120,7 +120,7 @@ test('chat: reply, follow-up, reload keeps order, new conversation is empty', as
   await test.step('a new conversation opens an empty chat, also after a reload', async () => {
     await page.getByRole('button', { name: 'New conversation' }).click();
     await expect(roles(page)).toHaveCount(0);
-    await expect(page.getByText('Ask anything.')).toBeVisible();
+    await expect(page.getByText('Ask about the articles in your library.')).toBeVisible();
     await page.reload();
     await openChat(page);
     await expect(roles(page)).toHaveCount(0);

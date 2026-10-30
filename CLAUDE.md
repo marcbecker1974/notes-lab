@@ -39,6 +39,26 @@ AI model calls:
   created. Never set `CHAT_TEST_STUB` in `.env.local` or for the normal server, and keep
   `tests-stub/` out of the default `./tests` run (that one reuses the real server).
 
+Embeddings:
+- Use openai/text-embedding-3-small via OpenRouter's embeddings endpoint, using
+  the existing OPENROUTER_API_KEY. All embedding calls happen server-side only.
+- The documents table embedding column is vector(1536) — do not change this dimension.
+- Never change the embedding model after initial setup without dropping and
+  re-embedding all documents. Changing the model breaks retrieval silently.
+- Embedding calls live in `getEmbeddings()` in `lib/ai/openrouter.ts` (the model and
+  dimension are constants in `lib/ai/config.ts`, not env settings). `pages` and
+  `documents` are read and written only by `lib/library/library-store.ts`, with the
+  user's session client. Every Wikipedia request carries the User-Agent from
+  `lib/library/wikipedia.ts` (app name and contact email). Tests: `npm run test:library` (offline) and `npm run test:library-rls`
+  (`--dry-run` offline; `--run` writes and removes disposable `ZZ-LIB-` rows).
+- **Library search tool (chat):** the model can call `search_library` (OpenAI-style tool
+  calling inside `getChatReply`, no framework). The loop, the prompt rules and the search
+  budget (3 per question) live in `lib/ai/openrouter.ts`; the tool definition and result
+  formatting in `lib/ai/library-tool.ts`; the search itself in `lib/ai/library-search.ts`,
+  which embeds the query and calls `match_documents` with the request's session client. The
+  model supplies the query text only. Never pass a user id, a service key or a table name
+  to the tool. Tests: `npm run test:library-chat` (offline, model and search replaced).
+
 
 Notes Lab is the active **Turing College Sprint 2 project**, "Full-Stack App with Database and Authentication": a secure, multi-user Personal AI Development Journal with collections, tags and live search, continued from the Mid-Sprint Notes App. **Historical context:** the Mid-Sprint project, "Notes App with Collections and Search" (a personal notes app and AI Learning Journal), is complete; its scope and decisions are preserved in `docs/PROJECT_BRIEF.md` Part B.
 

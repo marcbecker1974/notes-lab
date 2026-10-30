@@ -426,3 +426,48 @@ Test substitute: with `CHAT_TEST_STUB=1` (set only by `playwright.chat.config.ts
 starts a separate dev server on port 3100 with its own build folder `.next-chat-test`)
 `getChatReply()` returns `[stub] reply N to: <text> (history: M)` without any request.
 
+
+## Wikipedia library (2026-10-30, `feature/wikipedia-library`)
+
+**Data (migration `20261030183957`, applied 2026-10-30).** `pages` (owner, title, URL, `last_fetched_at`) and
+`documents` (owner, `page_id`, `chunk_index`, `content`, `embedding vector(1536)`). A composite foreign key
+`(page_id, user_id)` makes a chunk's owner the page's owner, and deleting a page deletes its chunks. Owner-only RLS
+and column-level grants like notes and chat; `anon` has nothing. `match_documents(query_embedding, match_threshold,
+match_count)` is `security invoker`, returns only the caller's chunks with `page_title` and `page_url`, best match
+first. It is not called by the app yet.
+
+**Flow (`/library`, private).** The page calls `requireUser()`; the `addToLibrary` Server Action
+(`app/library/actions.ts`) calls it again, then for each input line, one at a time: `lib/library/parse-input.ts`
+(links or titles; the host is built from a validated language code, never from user text) ->
+`lib/library/wikipedia.ts` (MediaWiki Action API, `redirects=1`, plain-text extract, User-Agent
+`NotesLab/1.0 (marc.becker@berlin.de)`, extract cut at 50,000 characters) -> `lib/library/chunk.ts` (about 500
+characters, 100 overlap) -> `getEmbeddings()` in `lib/ai/openrouter.ts` (`openai/text-embedding-3-small`, constants
+in `lib/ai/config.ts`, batches of 32) -> `lib/library/library-store.ts` (the only module that touches `pages` and
+`documents`, with the user's session client). Nothing is saved unless all chunks have embeddings; a failure after
+the page row was written removes the page again. Adding a link that is already saved replaces its chunks.
+**Refresh** (`lib/library/refresh.ts`) re-fetches a saved page by its stored link and replaces its chunks; if Wikipedia now
+reports a different link, the new link is saved and the old page removed. **Remove** deletes the page and the database
+cascades to its chunks. Both are Server Actions that call `requireUser()` and use the session client, so a page id that
+is not the caller's is simply not found.
+
+**Limits.** At most 10 lines per submission. Wikipedia text goes to OpenRouter for embedding. Tests:
+`npm run test:library` (offline, `fetch` replaced) and `npm run test:library-rls` (`--dry-run` offline; `--run` uses the two
+test accounts, writes and removes disposable `ZZ-LIB-` rows, fake Wikipedia and embeddings, no network except Supabase).
+
+### Library search as a chat tool (2026-10-30)
+
+`POST /api/chat` now offers the model one tool, `search_library(query)`, through the chat-completions `tools`
+parameter. `getChatReply` runs the loop: the model answers or calls the tool; each call is executed on the server
+(`lib/ai/library-search.ts`: embed the query, `match_documents` with the user's session client, threshold 0.25, 6
+passages) and the passages, with titles, links and similarity, go back as a tool message. At most 3 searches per
+question (the first plus two retries); after that the model gets `tool_choice: "none"`. The response carries
+`searches` (query and passage count) and the chat shows each one above the answer.
+
+Rules in the prompt: no search for small talk; simple arithmetic is answered without search or citation and says it is
+not from the library; every factual question is searched first; poor results mean a rewritten query; unsupported
+answers are exactly "Not covered by your library."; no general knowledge. **Enforced in code:** the search budget;
+if every search returned nothing (or failed) the answer is replaced by the fixed sentence; markdown links that the
+search did not return are reduced to text, and the chat only links https Wikipedia addresses. **Not enforced in code:**
+that the model searches at all, that it ignores what it knows, and that it judges "poor results" well. Those follow
+the prompt. Searches are not saved with the conversation (no schema change), so a reloaded conversation shows answers
+without the search lines. Notes in the system prompt (earlier approval) stay, for questions about the user's own notes.

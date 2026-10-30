@@ -1,6 +1,7 @@
 import { requireUser } from "@/lib/auth/require-user";
 import { loadNotesForChat } from "@/lib/ai/chat-notes";
 import { saveExchange } from "@/lib/ai/chat-store";
+import { makeLibrarySearch } from "@/lib/ai/library-search";
 import { parseChatMessages } from "@/lib/ai/messages";
 import { buildNotesContext } from "@/lib/ai/notes-context";
 import { ChatServiceError, getChatReply } from "@/lib/ai/openrouter";
@@ -48,13 +49,14 @@ export async function POST(request: Request) {
     return Response.json({ error: "The conversation is invalid or too long. Start a new conversation." }, { status: 400 });
   }
 
-  // Both reads and the save below use the user's own session (RLS).
+  // The reads, the library search and the save below use the user's own session (RLS).
   const supabase = await createClient();
   const notes = await loadNotesForChat(supabase);
   const notesContext = notes ? buildNotesContext(notes) : null;
 
   try {
-    const reply = await getChatReply(messages, notesContext);
+    // The model may call search_library; the search runs here with the user's own session.
+    const reply = await getChatReply(messages, notesContext, makeLibrarySearch(supabase));
     // Persistence sits on top of the reply: a failed save never blocks the answer.
     const stored = await saveExchange(supabase, conversationId, messages[messages.length - 1].content, reply.content);
     return Response.json(

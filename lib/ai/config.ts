@@ -11,3 +11,11 @@ export function getOpenRouterConfig() {
     model: process.env.OPENROUTER_MODEL?.trim() || "google/gemini-2.5-flash",
   };
 }
+
+/**
+ * Embedding rules (CLAUDE.md): one fixed model, never read from the environment. The
+ * documents.embedding column is vector(1536); changing the model or the dimension means
+ * dropping and re-embedding every document, otherwise retrieval breaks silently.
+ */
+export const EMBEDDING_MODEL = "openai/text-embedding-3-small";
+export const EMBEDDING_DIMENSIONS = 1536;

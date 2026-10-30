@@ -1,6 +1,7 @@
 "use client";
 
-import { PanelLeft, Plus, Search } from "lucide-react";
+import { BookOpen, PanelLeft, Plus, Search } from "lucide-react";
+import Link from "next/link";
 
 import { AuthStatus } from "./auth-status";
 import { Button } from "@/components/ui/button";
@@ -57,6 +58,11 @@ export function TopBar(props: TopBarProps) {
         aria-label="New note"
       >
         <Plus /> <span className="max-sm:sr-only">New note</span>
+      </Button>
+      <Button asChild variant="ghost" className="h-11 max-sm:w-11 max-sm:px-0">
+        <Link href="/library" aria-label="My library">
+          <BookOpen /> <span className="max-sm:sr-only">My library</span>
+        </Link>
       </Button>
       <AuthStatus className="max-md:hidden" />
     </div>

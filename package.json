@@ -15,7 +15,10 @@
     "test:ai": "node scripts/test-openrouter.mts",
     "test:ai:live": "node scripts/test-openrouter.mts --live",
     "test:chat": "node scripts/test-chat-store.mts",
-    "test:chat-rls": "node scripts/test-chat-rls.mts"
+    "test:chat-rls": "node scripts/test-chat-rls.mts",
+    "test:library": "node scripts/test-library.mts",
+    "test:library-chat": "node scripts/test-library-chat.mts",
+    "test:library-rls": "node scripts/test-library-rls.mts"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.2.1",
