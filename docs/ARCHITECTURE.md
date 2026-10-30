@@ -374,3 +374,49 @@ The plan written on 2026-10-15 was carried out the same day; section 4b is the d
 ### 9.5 Not planned for Sprint 2
 
 Account linking (FUT-1), deployment, public sharing, AI features.
+
+
+## Chat lab extension (2026-10-30): server connection
+
+Separate scope from Sprint 2; see `CHAT_LAB.md` and `PROJECT_BRIEF.md` Part C.
+`POST /api/chat` uses the existing session proxy plus `requireUser()` on the
+server, checks same-origin JSON requests, bounds the request body and validates
+the conversation. `lib/ai/messages.ts` holds shared types and pure validation;
+`lib/ai/config.ts` (server-only) reads OPENROUTER_API_KEY and the single
+OPENROUTER_MODEL setting, defaulting to google/gemini-2.5-flash. The only external
+model request is `getChatReply()` in `lib/ai/openrouter.ts` (server-only), via fetch,
+with a fixed system instruction, full conversation, bounded output and a 30-second
+timeout. No API key or raw provider errors reach clients.
+
+Notes in chat (owner-approved 2026-10-30): before each model call the route reads the
+signed-in user's notes (`title, body`, newest 50) with the server client built from the
+request cookie, so RLS returns only that user's rows (`lib/ai/chat-notes.ts`, server-only;
+a documented exception because `lib/notes-db.ts` is browser-only). `buildNotesContext()`
+(`lib/ai/notes-context.ts`, pure) turns them into a block capped at 20,000 characters
+(2,000 per note) inside `<notes>` tags in the system prompt; the prompt tells the model
+to answer only from them, name the notes it used and treat the text as data. If the notes
+cannot be loaded the chat still answers and says so when asked. Note text is sent to the
+model provider with each message.
+
+Not implemented yet: `/chat` UI, conversation/message tables, database persistence,
+the real two-provider comparison, and chat Playwright tests. Later persistence
+requires owner-only RLS and a reviewed migration; no live schema change is made by
+this connection step.
+
+### Chat persistence and tests (2026-10-30)
+
+`conversations` (id, owner, optional title, created_at) and `messages` (id, conversation_id,
+owner, role `user`/`assistant`, content 1 to 8000 characters, created_at). Both: RLS on,
+owner-only policies `to authenticated` with `(select auth.uid()) = user_id`, `anon`
+revoked, column grants (clients never set `user_id`, `id` or `created_at`). A message
+needs the user's own conversation (checked in the insert policy). Clients may read and
+append; conversations can be deleted by their owner (messages by cascade); nothing can be
+updated. `GET /api/chat/history` returns the newest conversation, `POST
+/api/chat/conversations` opens an empty one, and `POST /api/chat` saves each exchange
+after the reply (the conversation id comes back; a failed save never blocks the answer).
+The in-conversation memory is unchanged: the client still sends the whole history.
+
+Test substitute: with `CHAT_TEST_STUB=1` (set only by `playwright.chat.config.ts`, which
+starts a separate dev server on port 3100 with its own build folder `.next-chat-test`)
+`getChatReply()` returns `[stub] reply N to: <text> (history: M)` without any request.
+

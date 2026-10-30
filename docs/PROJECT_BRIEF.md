@@ -2,6 +2,8 @@
 
 **Notes Lab – Personal AI Development Journal**
 
+> **New authorised extension (2026-10-30):** the owner requested the OpenRouter chatbot-with-memory lab in this repository. Part C records its separate scope and verification. The historical Sprint 2 exclusion of AI does not apply to this lab; deployment remains excluded.
+
 > **Status (2026-10-15):** the active scope is the **Turing College Sprint 2 project**, "Full-Stack App with Database and Authentication" (Part A). The completed **Mid-Sprint project** ("Notes App with Collections and Search") is kept unchanged as a historical phase in Part B. This file is the **single source of truth** for active scope, requirements, acceptance criteria, requirement status, selected optional tasks, the feature roadmap, the verification checklist and the submission requirements. Nothing in Part A is implemented merely because it is written here: the traceability matrix (A7) says what is implemented and what is verified.
 
 | Document | Responsibility |
@@ -368,6 +370,23 @@ Additional follow-ups (not yet features): optional account linking (FUT-1); fina
 6. Whether Supabase links identities with the same verified email (A11).
 7. Storage design for Feature 10 (private bucket, path scheme, orphan cleanup) and the dedicated Storage module decision above.
 8. How the repository is duplicated or transferred to the Turing submission area, and whether PR history transfers (SUB-1, SUB-2).
+
+# Part C – OpenRouter chatbot with memory (authorised 2026-10-30)
+
+Source: the owner's three attached lab screenshots and confirmation to use
+`notes-lab`. This is a new extension, not a change to the historical Sprint 2
+submission. Implementation notes and setup: `docs/CHAT_LAB.md`.
+
+| ID | Requirement | Implementation | Verification |
+|---|---|---|---|
+| CHAT-1 | OpenRouter only on the server; private API; secret never exposed; one model setting | Server adapter, config and private POST /api/chat prepared | PARTIAL: 7 offline tests, 2 Playwright tests, auth regression, typecheck, lint, build and browser-secret scan PASS (2026-10-30); live connection pending API key |
+| CHAT-2 | Chat UI with scrollable messages, composer and in-conversation context | Floating widget on /notes (`components/chat/`) and /chat fallback page; chat can answer from the user's own notes (server-side, RLS) | PARTIAL: 9 offline tests PASS; live check in browser PASS (2026-10-30: replied with the account's two note titles). Permanent Playwright test not written |
+| CHAT-3 | Per-user Supabase persistence, ordered reload and new empty conversation | Tables `conversations` and `messages`, owner-only RLS (migrations `20261030140000`, `20261030170000`, applied 2026-10-30); server-side save, history load, "New conversation" | PASS: `test:chat-rls` 10/10 against the live project (two accounts); `test:chat` 6/6 offline; browser: reload keeps messages in order, new conversation is empty (`test:e2e:chat`, 2026-10-30) |
+| CHAT-4 | Compare two providers using the same question in fresh conversations | Central OPENROUTER_MODEL setting prepared | OPEN: real comparison not performed |
+| CHAT-5 | Playwright verifies reply, follow-up, reload and new chat without live model calls; isolated test-data cleanup | `tests-stub/chat-flow.spec.ts` on a separate stub server (port 3100, `CHAT_TEST_STUB=1`); cleanup removes only its own conversations | PASS (2026-10-30): passed twice, no OpenRouter call; no test rows left. Cross-user data isolation is covered by `test:chat-rls` |
+
+No changes to existing notes or Supabase configuration are needed for CHAT-1.
+No commit or push is made without the owner's request.
 
 # Part B – Mid-Sprint Project (completed, historical)
 

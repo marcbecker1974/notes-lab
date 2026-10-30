@@ -10,7 +10,12 @@
     "test:list": "node scripts/test-note-list.mts",
     "test:mobile": "node scripts/test-mobile.mts",
     "test:rls": "node scripts/test-rls.mts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:chat": "playwright test -c playwright.chat.config.ts",
+    "test:ai": "node scripts/test-openrouter.mts",
+    "test:ai:live": "node scripts/test-openrouter.mts --live",
+    "test:chat": "node scripts/test-chat-store.mts",
+    "test:chat-rls": "node scripts/test-chat-rls.mts"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.2.1",
